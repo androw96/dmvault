@@ -1,0 +1,30 @@
+services:
+  - type: web
+    name: paladins-vault
+    env: python
+    plan: starter
+    autoDeploy: true
+    healthCheckPath: /api/health
+    buildCommand: pip install -r requirements.txt
+    startCommand: python3 -m uvicorn backend.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.4
+      - key: PYTHONUNBUFFERED
+        value: "1"
+      - key: APP_BASE_URL
+        value: https://paladinsvault.com
+      - key: SMTP_HOST
+        value: smtp.resend.com
+      - key: SMTP_PORT
+        value: "587"
+      - key: SMTP_USERNAME
+        value: resend
+      - key: SMTP_FROM_EMAIL
+        value: no-reply@paladinsvault.com
+      - key: SMTP_USE_TLS
+        value: "1"
+      - key: EMAIL_VERIFICATION_TTL_HOURS
+        value: "24"
+      - key: EMAIL_RESEND_COOLDOWN_SECONDS
+        value: "60"

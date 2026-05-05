@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Paladin's Vault • Print</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=Cormorant+Garamond:wght@600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body data-page="print">
+  <div class="page-shell">
+    <nav class="panel top-nav" aria-label="Primary">
+      <a class="menu-logo-link" href="/" aria-label="Paladin's Vault home">
+        <img class="menu-logo menu-logo-full" src="./assets/crystal-vault-logo.png" alt="Paladin's Vault logo">
+      </a>
+      <div class="top-nav-links">
+        <a class="nav-link" data-route-link="builder" href="/builder">Deck Builder</a>
+        <details class="nav-dropdown nav-explore-dropdown">
+          <summary class="nav-link" data-route-link="explore">Explore</summary>
+          <div class="nav-dropdown-menu explore-dropdown-menu">
+            <a class="nav-link nav-dropdown-link" href="/explore-decks?type=decks">Decks</a>
+            <a class="nav-link nav-dropdown-link" href="/explore-decks?type=users">Users</a>
+            <a class="nav-link nav-dropdown-link" href="/cards">Cards</a>
+          </div>
+        </details>
+        <a class="nav-link nav-login-link" data-login-nav href="#">Login</a>
+        <a class="nav-link" data-signup-nav href="#">Sign Up</a>
+        <details class="nav-dropdown nav-avatar-dropdown" data-profile-menu hidden>
+          <summary class="nav-avatar-trigger" aria-label="Open profile menu">
+            <span class="nav-avatar" data-nav-avatar>PV</span>
+          </summary>
+          <div class="nav-dropdown-menu profile-dropdown-menu">
+            <a class="nav-link nav-dropdown-link" href="/profile">Profile Settings</a>
+            <a class="nav-link nav-dropdown-link" href="/profile#my-decks">My Decks</a>
+            <a class="nav-link nav-dropdown-link" href="/profile">My Profile</a>
+            <a class="nav-link nav-dropdown-link nav-link-danger" href="/profile?deleteAccount=1">Delete Account</a>
+          </div>
+        </details>
+        <a class="nav-link nav-link-danger nav-logout-link" data-logout-nav href="#">Logout</a>
+      </div>
+    </nav>
+
+    <main class="page-stack">
+      <section class="panel print-control-panel">
+        <div class="panel-header">
+          <div>
+            <p class="section-label">Print Deck</p>
+            <h2>Choose the deck you want to print</h2>
+          </div>
+        </div>
+        <div class="filters">
+          <label class="field">
+            <span>Select Saved Deck</span>
+            <select id="print-deck-select">
+              <option value="working">Current Working Deck</option>
+            </select>
+          </label>
+        </div>
+      </section>
+
+      <section class="panel print-panel">
+        <div class="print-actions">
+          <button id="generate-print-button" class="primary-button">Refresh Print Layout</button>
+          <button id="window-print-button" class="ghost-button">Print</button>
+          <a id="print-pdf-export-link" class="ghost-button" href="#" target="_blank" rel="noreferrer">Export to PDF</a>
+        </div>
+        <div id="print-pages" class="print-pages"></div>
+      </section>
+    </main>
+    <footer class="panel legal-footer">
+      <div class="legal-footer-top">
+        <a class="ghost-button legal-back-to-top" href="#top">Back to Top</a>
+      </div>
+      <div class="legal-footer-copy">
+        <p>Duel Masters, Kaijudo, related card names, card frames, artwork, and associated marks are trademarks and intellectual property of their respective rights holders, including Wizards of the Coast LLC and other licensors. All rights remain with their respective owners.</p>
+        <p>Paladin's Vault is an unofficial fan-made deckbuilding and collection website. It is not affiliated with, endorsed, sponsored, or specifically approved by Wizards of the Coast LLC, Hasbro, Takara Tomy, Shogakukan, or any other Duel Masters rights holder.</p>
+        <p>Paladin's Vault is intended to operate as non-official fan content. Users are responsible for how they use exported decklists, proxy sheets, and printed materials, and should make sure their use complies with the policies and laws that apply to them.</p>
+      </div>
+      <div class="legal-footer-bottom">
+        <p class="legal-footer-meta">© 2026 Paladin's Vault</p>
+        <div class="legal-footer-links">
+          <a href="/terms">Terms of Service</a>
+          <a href="/privacy">Privacy Policy</a>
+          <a href="/fan-policy">Fan Content &amp; IP Policy</a>
+          <a href="/contact">Contact</a>
+        </div>
+      </div>
+    </footer>
+  </div>
+  <div id="auth-modal" class="modal-shell" hidden>
+    <div class="modal-backdrop" data-close-auth-modal></div>
+    <section class="panel modal-panel auth-modal-panel">
+      <div class="panel-header">
+        <div>
+          <p class="section-label">Login</p>
+          <h2>Sign in with email</h2>
+        </div>
+        <button id="close-auth-modal" type="button" class="ghost-button">Close</button>
+      </div>
+      <div class="create-profile-grid">
+        <label class="field">
+          <span>Email</span>
+          <input id="login-email" type="email" placeholder="you@example.com">
+        </label>
+        <label class="field">
+          <span>Password</span>
+          <input id="login-password" type="password" placeholder="Your password">
+        </label>
+        <button id="login-button" class="primary-button">Login</button>
+      </div>
+    </section>
+  </div>
+  <div id="signup-modal" class="modal-shell" hidden>
+    <div class="modal-backdrop" data-close-signup-modal></div>
+    <section class="panel modal-panel auth-modal-panel">
+      <div class="panel-header">
+        <div><p class="section-label">Sign Up</p><h2>Create your account</h2></div>
+        <button id="close-signup-modal" type="button" class="ghost-button">Close</button>
+      </div>
+      <div class="create-profile-grid">
+        <label class="field"><span>Username</span><input id="new-profile-name" type="text" placeholder="Example: Ozymandias96"></label>
+        <label class="field"><span>Email</span><input id="register-email" type="email" placeholder="you@example.com"></label>
+        <input id="register-avatar-url" type="hidden">
+        <label class="field"><span>Password</span><input id="register-password" type="password" placeholder="At least 8 characters"></label>
+        <div class="hero-actions">
+          <button id="create-profile-button" class="primary-button">Register</button>
+          <button type="button" class="ghost-button" data-open-auth-modal>Login</button>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script src="./app.js"></script>
+</body>
+</html>

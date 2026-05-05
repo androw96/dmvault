@@ -1,0 +1,16 @@
+[Unit]
+Description=Paladin's Vault FastAPI app
+After=network.target
+
+[Service]
+Type=simple
+User=deploy
+Group=deploy
+WorkingDirectory=/opt/paladinsvault
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/opt/paladinsvault/.venv/bin/python3 -m uvicorn backend.main:app --host 127.0.0.1 --port 8001
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
