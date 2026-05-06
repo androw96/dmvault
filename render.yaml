@@ -12,6 +12,8 @@ services:
         value: 3.12.4
       - key: PYTHONUNBUFFERED
         value: "1"
+      - key: RESEND_API_KEY
+        sync: false
       - key: APP_BASE_URL
         value: https://paladinsvault.com
       - key: SMTP_HOST

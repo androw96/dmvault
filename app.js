@@ -252,6 +252,12 @@ const elements = {
   adminUserList: document.querySelector("#admin-user-list"),
   adminDeckList: document.querySelector("#admin-deck-list"),
   adminAuditLog: document.querySelector("#admin-audit-log"),
+  adminContactInbox: document.querySelector("#admin-contact-inbox"),
+  contactUsername: document.querySelector("#contact-username"),
+  contactEmail: document.querySelector("#contact-email"),
+  contactSubject: document.querySelector("#contact-subject"),
+  contactMessage: document.querySelector("#contact-message"),
+  contactSubmitButton: document.querySelector("#contact-submit-button"),
   statusNodes: [...document.querySelectorAll("[data-status]")]
 };
 
@@ -331,6 +337,7 @@ async function initialize() {
   renderPrintPages();
   renderHeaderStats();
   renderAdminPage();
+  renderContactPage();
 }
 
 function ensureNotificationMenu() {
@@ -602,6 +609,7 @@ function bindEvents() {
   }
   elements.textImportButton?.addEventListener("click", importTextDeck);
   elements.adminNotifyButton?.addEventListener("click", sendAdminNotification);
+  elements.contactSubmitButton?.addEventListener("click", submitContactMessage);
 }
 
 function setActiveNav() {
@@ -880,6 +888,51 @@ async function maybeLoadSharedDeck() {
 
   const payload = await loadDeckIntoWorkspace(shareMatch[1], { openBuilder: true });
   setStatus(`Loaded shared deck: ${payload.title}${payload.owner ? ` by ${displayUsername(payload.owner.username)}` : ""}`, "success");
+}
+
+function renderContactPage() {
+  if (!elements.contactUsername || !elements.contactEmail) {
+    return;
+  }
+  const profile = activeProfile();
+  if (profile) {
+    elements.contactUsername.value = displayUsername(profile.username);
+    elements.contactEmail.value = profile.email || "";
+  }
+}
+
+async function submitContactMessage() {
+  const profile = activeProfile();
+  const username = elements.contactUsername?.value.trim() || profile?.username || "";
+  const email = elements.contactEmail?.value.trim() || profile?.email || "";
+  const subject = elements.contactSubject?.value.trim() || "";
+  const message = elements.contactMessage?.value.trim() || "";
+  if (!username || !email || !subject || !message) {
+    setStatus("Enter username, email, subject, and message first.", "error");
+    return;
+  }
+  try {
+    const payload = await fetchJson(`${API_BASE}/contact-messages`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        profile_id: profile?.id || null,
+        username,
+        email,
+        subject,
+        message
+      })
+    });
+    if (elements.contactSubject) elements.contactSubject.value = "";
+    if (elements.contactMessage) elements.contactMessage.value = "";
+    setStatus(payload.message || "Message sent.", "success");
+    if (page === "admin" && state.activeProfileId && activeProfile()?.is_admin) {
+      await loadAdminOverview();
+      renderAdminPage();
+    }
+  } catch (error) {
+    setStatus(error.message || "Contact message could not be sent.", "error");
+  }
 }
 
 function renderWelcome() {
@@ -1221,6 +1274,32 @@ function renderAdminPage() {
     elements.adminDeckList.replaceChildren();
     for (const deck of overview.recent_decks || []) {
       elements.adminDeckList.append(buildDeckSummaryCard(deck));
+    }
+  }
+
+  if (elements.adminContactInbox) {
+    elements.adminContactInbox.replaceChildren();
+    for (const item of overview.recent_contact_messages || []) {
+      const row = document.createElement("div");
+      row.className = "admin-month-row";
+      row.innerHTML = `
+        <strong>${escapeHtml(item.subject || "Message")}</strong>
+        <span>${escapeHtml(item.created_at_label || "")}</span>
+      `;
+      const meta = document.createElement("p");
+      meta.className = "hero-text";
+      meta.innerHTML = `<strong>${escapeHtml(displayUsername(item.username || "user"))}</strong> • ${escapeHtml(item.email || "")}`;
+      const body = document.createElement("p");
+      body.className = "hero-text";
+      body.textContent = item.message || "";
+      row.append(meta, body);
+      elements.adminContactInbox.append(row);
+    }
+    if (!(overview.recent_contact_messages || []).length) {
+      const empty = document.createElement("p");
+      empty.className = "hero-text";
+      empty.textContent = "No user messages yet.";
+      elements.adminContactInbox.append(empty);
     }
   }
 

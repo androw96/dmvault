@@ -97,6 +97,25 @@ class GenericMessageOut(BaseModel):
     verification_url: str | None = None
 
 
+
+
+class ContactMessageIn(BaseModel):
+    profile_id: int | None = None
+    username: str
+    email: str
+    subject: str
+    message: str
+
+
+class ContactMessageOut(BaseModel):
+    id: int
+    username: str
+    email: str
+    subject: str
+    message: str
+    created_at_label: str
+    read: bool = False
+
 class NotificationOut(BaseModel):
     id: int
     type: str
@@ -230,3 +249,4 @@ class AdminOverviewOut(BaseModel):
     profiles_by_month: list[MonthlyStatOut]
     decks_by_month: list[MonthlyStatOut]
     audit_log: list[dict[str, str | int | None]]
+    recent_contact_messages: list[ContactMessageOut] = []

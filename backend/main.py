@@ -11,6 +11,8 @@ import smtplib
 import ssl
 import time
 from email.message import EmailMessage
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
 
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
@@ -20,7 +22,7 @@ from sqlalchemy.orm import Session, joinedload
 
 from .database import BASE_DIR, SessionLocal
 from .image_service import ensure_card_image
-from .models import AdminAuditLog, Card, Deck, DeckItem, DeckLike, DeckRevision, EmailVerificationToken, Notification, Profile, ProfileFollow
+from .models import AdminAuditLog, Card, ContactMessage, Deck, DeckItem, DeckLike, DeckRevision, EmailVerificationToken, Notification, Profile, ProfileFollow
 from .pdf_service import build_deck_pdf
 from .schemas import (
     AdminBanIn,
@@ -30,6 +32,8 @@ from .schemas import (
     AuthRegisterIn,
     AuthResponse,
     CardListResponse,
+    ContactMessageIn,
+    ContactMessageOut,
     CardOut,
     DeckCardOut,
     DeckCreateIn,
@@ -60,6 +64,7 @@ from .utils import format_image_path, format_illustration_path, generate_public_
 FRONTEND_DIR = BASE_DIR.parent
 logger = logging.getLogger(__name__)
 APP_BASE_URL = os.getenv("APP_BASE_URL", "http://127.0.0.1:8001").rstrip("/")
+RESEND_API_KEY = os.getenv("RESEND_API_KEY", "").strip()
 SMTP_HOST = os.getenv("SMTP_HOST", "").strip()
 SMTP_PORT = int(os.getenv("SMTP_PORT", "2587"))
 SMTP_USERNAME = os.getenv("SMTP_USERNAME", "").strip()
@@ -230,56 +235,81 @@ def verification_token_hash(token: str) -> str:
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
 
+def resend_configured() -> bool:
+    return bool(RESEND_API_KEY and SMTP_FROM_EMAIL)
+
+
 def smtp_configured() -> bool:
     return bool(SMTP_HOST and SMTP_FROM_EMAIL and SMTP_PASSWORD)
 
 
+def email_delivery_configured() -> bool:
+    return resend_configured() or smtp_configured()
+
+
 def local_verification_fallback_enabled() -> bool:
-    return not smtp_configured()
+    return not email_delivery_configured()
 
 
 def build_verification_link(raw_token: str) -> str:
     return f"{APP_BASE_URL}/api/auth/verify-email?token={raw_token}"
 
 
+def build_email_shell(*, eyebrow: str, title: str, intro: str, body_html: str, footer_html: str = "") -> str:
+    return f"""
+    <html>
+      <body style="margin:0;padding:0;background:#070b14;color:#f5faff;font-family:Arial,sans-serif;">
+        <div style="max-width:640px;margin:0 auto;padding:32px 18px;">
+          <div style="background:linear-gradient(160deg,#0f1728 0%,#101a30 45%,#12233f 100%);border:1px solid rgba(118,227,255,0.18);border-radius:28px;padding:32px 28px;box-shadow:0 22px 60px rgba(6,12,30,0.45);">
+            <div style="text-align:center;margin-bottom:22px;">
+              <img src="{APP_BASE_URL}/assets/crystal-vault-logo.png" alt="Paladin's Vault" style="width:92px;height:auto;display:block;margin:0 auto 12px;">
+              <div style="letter-spacing:0.22em;text-transform:uppercase;font-size:11px;color:#7eddf6;">{eyebrow}</div>
+              <h1 style="margin:10px 0 8px;font-size:30px;line-height:1.15;color:#ffffff;font-family:'Georgia',serif;">{title}</h1>
+              <p style="margin:0 auto;max-width:480px;font-size:15px;line-height:1.7;color:#c7d7f6;">{intro}</p>
+            </div>
+            <div style="background:rgba(255,255,255,0.03);border:1px solid rgba(126,221,246,0.14);border-radius:20px;padding:22px 20px;">
+              {body_html}
+            </div>
+            <div style="margin-top:18px;font-size:12px;line-height:1.7;color:#8ea3c7;">
+              {footer_html}
+            </div>
+          </div>
+        </div>
+      </body>
+    </html>
+    """
+
+
 def build_verification_message(profile: Profile, raw_token: str) -> EmailMessage:
     verify_url = build_verification_link(raw_token)
     message = EmailMessage()
     message["Subject"] = "Verify your Paladin's Vault account"
-    message["From"] = SMTP_FROM_EMAIL
+    message["From"] = f"Paladin's Vault <{SMTP_FROM_EMAIL}>"
     message["To"] = profile.email
     message.set_content(
         f"""Hello {profile.username},
 
-Thanks for registering for Paladin's Vault.
+Welcome to Paladin's Vault.
 
-Please verify your email by opening the link below:
+Please verify your email address by opening the link below:
 {verify_url}
 
-This link expires in {EMAIL_VERIFICATION_TTL_HOURS} hours.
+This verification link expires in {EMAIL_VERIFICATION_TTL_HOURS} hours.
 
-If you did not create this account, you can ignore this message.
+If you did not create this account, you can safely ignore this email.
 """
     )
-    message.add_alternative(
-        f"""
-        <html>
-          <body style="font-family: Arial, sans-serif; background: #0d1117; color: #f5faff; padding: 24px;">
-            <h2>Verify your Paladin's Vault account</h2>
-            <p>Hello {profile.username},</p>
-            <p>Thanks for registering for Paladin's Vault.</p>
-            <p>
-              <a href="{verify_url}" style="display:inline-block;padding:12px 18px;border-radius:12px;background:#76e3ff;color:#081018;text-decoration:none;font-weight:700;">
-                Verify Email
-              </a>
-            </p>
-            <p>This link expires in {EMAIL_VERIFICATION_TTL_HOURS} hours.</p>
-            <p>If you did not create this account, you can ignore this message.</p>
-          </body>
-        </html>
-        """,
-        subtype="html",
-    )
+    body_html = f"""
+      <p style="margin:0 0 14px;font-size:15px;line-height:1.75;color:#d7e5ff;">Hello <strong>{profile.username}</strong>,</p>
+      <p style="margin:0 0 16px;font-size:15px;line-height:1.75;color:#d7e5ff;">Welcome to Paladin's Vault. Click the button below to verify your email and unlock secure login.</p>
+      <div style="text-align:center;margin:24px 0 20px;">
+        <a href="{verify_url}" style="display:inline-block;padding:14px 22px;border-radius:14px;background:linear-gradient(135deg,#7ce7ff,#9fcbff);color:#081018;text-decoration:none;font-weight:800;letter-spacing:0.04em;">Verify Email</a>
+      </div>
+      <p style="margin:0 0 12px;font-size:14px;line-height:1.7;color:#c7d7f6;word-break:break-all;">Or open this link directly:<br><a href="{verify_url}" style="color:#8fe7ff;">{verify_url}</a></p>
+      <p style="margin:0;font-size:13px;line-height:1.7;color:#9fb2d5;">This verification link expires in <strong>{EMAIL_VERIFICATION_TTL_HOURS} hours</strong>.</p>
+    """
+    footer_html = "If you did not create this account, you can safely ignore this email."
+    message.add_alternative(build_email_shell(eyebrow="Account Security", title="Verify your email", intro="Complete your Paladin's Vault registration with one secure click.", body_html=body_html, footer_html=footer_html), subtype="html")
     return message
 
 
@@ -287,7 +317,7 @@ def build_deck_like_message(owner: Profile, liking_profile: Profile, deck: Deck)
     deck_url = f"{APP_BASE_URL}/share/{deck.public_id}"
     message = EmailMessage()
     message["Subject"] = "Your deck was liked on Paladin's Vault"
-    message["From"] = SMTP_FROM_EMAIL
+    message["From"] = f"Paladin's Vault <{SMTP_FROM_EMAIL}>"
     message["To"] = owner.email
     message.set_content(
         f"""Hello {owner.username},
@@ -298,29 +328,53 @@ Open the deck:
 {deck_url}
 """
     )
-    message.add_alternative(
-        f"""
-        <html>
-          <body style="font-family: Arial, sans-serif; background: #0d1117; color: #f5faff; padding: 24px;">
-            <h2>Your deck was liked</h2>
-            <p>Hello {owner.username},</p>
-            <p><strong>{liking_profile.username}</strong> liked your deck <strong>{deck.title}</strong> on Paladin's Vault.</p>
-            <p>
-              <a href="{deck_url}" style="display:inline-block;padding:12px 18px;border-radius:12px;background:#76e3ff;color:#081018;text-decoration:none;font-weight:700;">
-                Open Deck
-              </a>
-            </p>
-          </body>
-        </html>
-        """,
-        subtype="html",
-    )
+    body_html = f"""
+      <p style="margin:0 0 14px;font-size:15px;line-height:1.75;color:#d7e5ff;">Hello <strong>{owner.username}</strong>,</p>
+      <p style="margin:0 0 16px;font-size:15px;line-height:1.75;color:#d7e5ff;"><strong>{liking_profile.username}</strong> just crystal liked your deck <strong>{deck.title}</strong>.</p>
+      <div style="text-align:center;margin:24px 0 20px;">
+        <a href="{deck_url}" style="display:inline-block;padding:14px 22px;border-radius:14px;background:linear-gradient(135deg,#7ce7ff,#9fcbff);color:#081018;text-decoration:none;font-weight:800;letter-spacing:0.04em;">Open Deck</a>
+      </div>
+    """
+    message.add_alternative(build_email_shell(eyebrow="Deck Activity", title="Your deck got a new like", intro="Your shared Duel Masters lists are getting noticed.", body_html=body_html, footer_html="You are receiving this because notifications for deck activity are enabled through your Paladin's Vault account."), subtype="html")
     return message
 
 
+def send_via_resend_api(message: EmailMessage) -> None:
+    text_part = message.get_body(preferencelist=("plain",))
+    html_part = message.get_body(preferencelist=("html",))
+    payload = {
+        "from": message.get("From"),
+        "to": [message.get("To")],
+        "subject": message.get("Subject"),
+        "text": text_part.get_content() if text_part else None,
+        "html": html_part.get_content() if html_part else None,
+    }
+    body = json.dumps(payload).encode("utf-8")
+    request = Request(
+        "https://api.resend.com/emails",
+        data=body,
+        headers={
+            "Authorization": f"Bearer {RESEND_API_KEY}",
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+    try:
+        with urlopen(request, timeout=20) as response:
+            response.read()
+    except HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="ignore")
+        raise RuntimeError(f"Resend API error: {exc.code} {detail}") from exc
+    except URLError as exc:
+        raise RuntimeError(f"Resend API connection error: {exc}") from exc
+
+
 def send_email_message(message: EmailMessage) -> None:
+    if resend_configured():
+        send_via_resend_api(message)
+        return
     if not smtp_configured():
-        raise RuntimeError("SMTP is not configured.")
+        raise RuntimeError("Email delivery is not configured.")
     if SMTP_USE_TLS:
         context = ssl.create_default_context()
         with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=20) as server:
@@ -919,6 +973,44 @@ def mark_notifications_read(profile_id: int, db: Session = Depends(get_db)) -> G
     return GenericMessageOut(status="ok", message="Notifications marked as read.")
 
 
+def contact_message_to_out(message: ContactMessage) -> ContactMessageOut:
+    return ContactMessageOut(
+        id=message.id,
+        username=message.username,
+        email=message.email,
+        subject=message.subject,
+        message=message.message,
+        created_at_label=(message.created_at or datetime.utcnow()).strftime("%Y-%m-%d %H:%M:%S"),
+        read=bool(message.read_at),
+    )
+
+
+@app.post("/api/contact-messages", response_model=GenericMessageOut)
+def create_contact_message(payload: ContactMessageIn, db: Session = Depends(get_db)) -> GenericMessageOut:
+    username = slugify(payload.username)
+    email = normalize_email(payload.email)
+    subject = payload.subject.strip()
+    message = payload.message.strip()
+    if not username:
+        raise HTTPException(status_code=400, detail="Username is required.")
+    if not email:
+        raise HTTPException(status_code=400, detail="Email is required.")
+    if not subject:
+        raise HTTPException(status_code=400, detail="Subject is required.")
+    if not message:
+        raise HTTPException(status_code=400, detail="Message is required.")
+    profile_id = payload.profile_id
+    if profile_id:
+        profile = db.get(Profile, profile_id)
+        if not profile:
+            raise HTTPException(status_code=404, detail="Profile not found.")
+        username = profile.username
+        email = profile.email or email
+    db.add(ContactMessage(profile_id=profile_id, username=username, email=email, subject=subject, message=message, created_at=datetime.utcnow()))
+    db.commit()
+    return GenericMessageOut(status="ok", message="Your message was sent to the Paladin's Vault admin inbox.")
+
+
 @app.get("/api/admin/overview", response_model=AdminOverviewOut)
 def admin_overview(admin_profile_id: int, db: Session = Depends(get_db)) -> AdminOverviewOut:
     require_admin(admin_profile_id, db)
@@ -941,6 +1033,7 @@ def admin_overview(admin_profile_id: int, db: Session = Depends(get_db)) -> Admi
     all_profiles = [profile_to_out(profile, include_email=True, viewer_profile_id=admin_profile_id) for profile in profiles if profile]
     recent_decks = [deck_summary_out(deck, deck.profile, include_owner_email=True, viewer_profile_id=admin_profile_id) for deck in decks[:18]]
     audits = db.scalars(select(AdminAuditLog).order_by(AdminAuditLog.created_at.desc()).limit(30)).all()
+    contact_messages = db.scalars(select(ContactMessage).order_by(ContactMessage.created_at.desc()).limit(40)).all()
     profile_months = [MonthlyStatOut(**item) for item in monthly_counts([profile.email_verified_at or profile.verification_sent_at or datetime.utcnow() for profile in profiles if profile])]
     deck_months = [MonthlyStatOut(**item) for item in monthly_counts([deck.created_at for deck in decks if deck.created_at])]
     return AdminOverviewOut(
@@ -955,6 +1048,7 @@ def admin_overview(admin_profile_id: int, db: Session = Depends(get_db)) -> Admi
             "cards": db.scalar(select(func.count(Card.id))) or 0,
             "notifications": db.scalar(select(func.count(Notification.id))) or 0,
             "likes": db.scalar(select(func.count(DeckLike.id))) or 0,
+            "contact_messages": db.scalar(select(func.count(ContactMessage.id))) or 0,
         },
         recent_profiles=recent_profiles,
         all_profiles=all_profiles,
@@ -971,6 +1065,7 @@ def admin_overview(admin_profile_id: int, db: Session = Depends(get_db)) -> Admi
             }
             for audit in audits
         ],
+        recent_contact_messages=[contact_message_to_out(item) for item in contact_messages],
     )
 
 

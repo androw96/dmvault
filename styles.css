@@ -2211,3 +2211,14 @@ input[type="range"] {
     grid-template-columns: 1fr;
   }
 }
+
+
+.contact-form-grid textarea {
+  min-height: 160px;
+  resize: vertical;
+}
+
+.notification-menu-header strong,
+.admin-month-row strong {
+  letter-spacing: 0.04em;
+}

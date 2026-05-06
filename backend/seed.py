@@ -152,6 +152,22 @@ def ensure_schema_updates() -> None:
                 )
                 """
             )
+        if "contact_messages" not in existing_tables:
+            connection.exec_driver_sql(
+                """
+                CREATE TABLE contact_messages (
+                    id INTEGER NOT NULL PRIMARY KEY,
+                    profile_id INTEGER,
+                    username VARCHAR(80) NOT NULL,
+                    email VARCHAR(255) NOT NULL,
+                    subject VARCHAR(255) NOT NULL,
+                    message TEXT NOT NULL,
+                    created_at DATETIME,
+                    read_at DATETIME,
+                    FOREIGN KEY(profile_id) REFERENCES profiles (id) ON DELETE SET NULL
+                )
+                """
+            )
 
 
 def seed_cards_if_needed() -> int:
