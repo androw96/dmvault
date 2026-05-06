@@ -61,7 +61,7 @@ FRONTEND_DIR = BASE_DIR.parent
 logger = logging.getLogger(__name__)
 APP_BASE_URL = os.getenv("APP_BASE_URL", "http://127.0.0.1:8001").rstrip("/")
 SMTP_HOST = os.getenv("SMTP_HOST", "").strip()
-SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
+SMTP_PORT = int(os.getenv("SMTP_PORT", "2587"))
 SMTP_USERNAME = os.getenv("SMTP_USERNAME", "").strip()
 SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
 SMTP_FROM_EMAIL = os.getenv("SMTP_FROM_EMAIL", "").strip()
@@ -231,7 +231,7 @@ def verification_token_hash(token: str) -> str:
 
 
 def smtp_configured() -> bool:
-    return bool(SMTP_HOST and SMTP_FROM_EMAIL)
+    return bool(SMTP_HOST and SMTP_FROM_EMAIL and SMTP_PASSWORD)
 
 
 def local_verification_fallback_enabled() -> bool:
