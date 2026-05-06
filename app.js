@@ -598,6 +598,22 @@ function bindEvents() {
   elements.saveProfileUsernameButton?.addEventListener("click", saveProfileUsername);
   elements.saveProfileAvatarButton?.addEventListener("click", saveProfileAvatar);
   elements.loginButton?.addEventListener("click", loginProfile);
+  for (const field of [elements.loginEmail, elements.loginPassword]) {
+    field?.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        void loginProfile();
+      }
+    });
+  }
+  for (const field of [elements.newProfileName, elements.registerEmail, elements.registerPassword]) {
+    field?.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        void createProfile();
+      }
+    });
+  }
   elements.resendVerificationButton?.addEventListener("click", resendVerificationEmail);
   elements.logoutButton?.addEventListener("click", logoutProfile);
   elements.followProfileButton?.addEventListener("click", toggleFollowViewedProfile);
