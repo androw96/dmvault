@@ -2222,3 +2222,148 @@ input[type="range"] {
 .admin-month-row strong {
   letter-spacing: 0.04em;
 }
+
+
+.card-art,
+.deck-image-art,
+.profile-deck-cover,
+.profile-user-avatar,
+.nav-avatar,
+.avatar-preview-card,
+.avatar-preset-art {
+  background-repeat: no-repeat;
+}
+
+.catalog-grid {
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+@media (max-width: 760px) {
+  body {
+    overflow-x: hidden;
+  }
+
+  .page-shell {
+    padding: 14px;
+    gap: 14px;
+  }
+
+  .top-nav {
+    border-radius: 24px;
+    padding: 12px;
+    align-items: stretch;
+  }
+
+  .top-nav-links {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    width: 100%;
+  }
+
+  .menu-logo-link {
+    align-self: center;
+    margin: 0 auto 8px;
+  }
+
+  .nav-link,
+  .nav-avatar-trigger,
+  .nav-bell-trigger {
+    min-height: 48px;
+    justify-content: center;
+  }
+
+  .welcome-hero {
+    padding: 28px 18px 24px;
+    min-height: unset;
+  }
+
+  .welcome-logo {
+    width: min(54vw, 220px);
+  }
+
+  .welcome-actions {
+    width: 100%;
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+
+  .welcome-actions .primary-button,
+  .welcome-actions .ghost-button {
+    width: 100%;
+  }
+
+  .page-hero,
+  .welcome-hero,
+  .panel {
+    border-radius: 24px;
+  }
+
+  .create-profile-grid,
+  .admin-two-column,
+  .deck-title-row,
+  .workspace-top {
+    grid-template-columns: 1fr !important;
+  }
+
+  .deck-workspace {
+    padding: 18px 14px;
+  }
+
+  .deck-list-image-mode {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+  }
+
+  .deck-image-card {
+    padding: 10px;
+    border-radius: 18px;
+  }
+
+  .deck-image-art {
+    min-height: 168px;
+  }
+
+  .catalog-grid {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+
+  .profile-decks.compact-grid,
+  .profile-decks {
+    grid-template-columns: 1fr;
+  }
+
+  .profile-deck-card {
+    min-height: 176px;
+    padding: 14px;
+  }
+
+  .profile-deck-actions,
+  .hero-actions {
+    flex-wrap: wrap;
+  }
+
+  .nav-dropdown-menu {
+    min-width: min(86vw, 320px);
+  }
+}
+
+@media (max-width: 540px) {
+  .top-nav-links {
+    grid-template-columns: 1fr;
+  }
+
+  .deck-list-image-mode {
+    grid-template-columns: 1fr;
+  }
+
+  .page-hero h1,
+  .welcome-hero h1 {
+    font-size: clamp(2rem, 8vw, 2.6rem);
+  }
+
+  .hero-text {
+    font-size: 0.96rem;
+  }
+}

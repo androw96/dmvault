@@ -28,6 +28,7 @@ from .schemas import (
     AdminBanIn,
     AdminNotificationIn,
     AdminOverviewOut,
+    AdminVerifyIn,
     AuthLoginIn,
     AuthRegisterIn,
     AuthResponse,
@@ -151,8 +152,14 @@ def ensure_default_admin_account() -> None:
     with SessionLocal() as db:
         existing = db.scalar(select(Profile).where(Profile.email == DEFAULT_ADMIN_EMAIL))
         if existing:
+            updated = False
             if not existing.is_admin:
                 existing.is_admin = 1
+                updated = True
+            if not existing.email_verified_at:
+                existing.email_verified_at = datetime.utcnow()
+                updated = True
+            if updated:
                 db.commit()
             return
         username = DEFAULT_ADMIN_USERNAME
@@ -432,6 +439,7 @@ def card_to_out(card: Card) -> CardOut:
         set_name=card.set_name,
         collector_number=card.collector_number,
         image_path=format_image_path(card.id),
+        illustration_path=format_illustration_path(card.name),
     )
 
 
@@ -1091,6 +1099,21 @@ def admin_notify(payload: AdminNotificationIn, request: Request, db: Session = D
     create_admin_audit(db, admin.id, "notify_all", detail=message)
     db.commit()
     return GenericMessageOut(status="ok", message=f"Notification sent to {len(targets)} users.")
+
+
+@app.post("/api/admin/verify", response_model=GenericMessageOut)
+def admin_verify(payload: AdminVerifyIn, db: Session = Depends(get_db)) -> GenericMessageOut:
+    admin = require_admin(payload.admin_profile_id, db)
+    target = db.get(Profile, payload.target_profile_id)
+    if not target:
+        raise HTTPException(status_code=404, detail="Target profile not found.")
+    if target.email_verified_at:
+        return GenericMessageOut(status="ok", message=f"{target.username} is already verified.")
+    target.email_verified_at = datetime.utcnow()
+    db.add(Notification(profile_id=target.id, actor_profile_id=admin.id, type="admin_message", message="Your email address has been manually verified by the Paladin's Vault admin.", created_at=datetime.utcnow()))
+    create_admin_audit(db, admin.id, "verify_email", target_profile_id=target.id, detail=target.email)
+    db.commit()
+    return GenericMessageOut(status="ok", message=f"{target.username} has been verified.")
 
 
 @app.post("/api/admin/ban", response_model=GenericMessageOut)

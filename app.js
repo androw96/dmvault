@@ -1265,12 +1265,22 @@ function renderAdminPage() {
         <div>
           <strong>${escapeHtml(displayUsername(profile.username))}</strong>
           <p>${escapeHtml(profile.email || "No email")}</p>
-          <small>${profile.is_admin ? "Admin" : "User"} • ${profile.is_banned ? "Banned" : "Active"}</small>
+          <small>${profile.is_admin ? "Admin" : "User"} • ${profile.is_banned ? "Banned" : "Active"} • ${profile.email_verified ? "Verified" : "Unverified"}</small>
         </div>
       `;
       const actions = document.createElement("div");
       actions.className = "hero-actions";
       if (!profile.is_admin && profile.id !== state.activeProfileId) {
+        if (!profile.email_verified) {
+          const verifyButton = document.createElement("button");
+          verifyButton.type = "button";
+          verifyButton.className = "primary-button";
+          verifyButton.textContent = "Verify";
+          verifyButton.addEventListener("click", async () => {
+            await verifyAdminUser(profile.id);
+          });
+          actions.append(verifyButton);
+        }
         const button = document.createElement("button");
         button.type = "button";
         button.className = profile.is_banned ? "ghost-button" : "danger-button";
@@ -2770,8 +2780,9 @@ function renderCards() {
 
     const art = fragment.querySelector(".card-art");
     art.style.background = cardGradient(card.civilizations[0]);
-    if (card.image_path) {
-      art.style.backgroundImage = `linear-gradient(rgba(18, 16, 14, 0.16), rgba(18, 16, 14, 0.16)), url('${card.image_path}')`;
+    const previewImage = card.illustration_path || card.image_path;
+    if (previewImage) {
+      art.style.backgroundImage = `linear-gradient(rgba(18, 16, 14, 0.16), rgba(18, 16, 14, 0.16)), url('${previewImage}')`;
       art.style.backgroundSize = "cover";
       art.style.backgroundPosition = "center";
     }
@@ -2805,7 +2816,7 @@ function renderPrintPages() {
       const cardNode = document.createElement("article");
       cardNode.className = "print-card";
       if (card.image_path) {
-        cardNode.innerHTML = `<img src="${card.image_path}" alt="${escapeHtml(card.name)}">`;
+        cardNode.innerHTML = `<img src="${card.image_path}" alt="${escapeHtml(card.name)}" loading="lazy" decoding="async">`;
       } else {
         cardNode.classList.add("print-card-fallback");
         cardNode.innerHTML = `<div class="print-card-placeholder" aria-label="${escapeHtml(card.name)}"></div>`;
@@ -2940,8 +2951,9 @@ function buildDeckImageCard(entry) {
   const art = document.createElement("div");
   art.className = "deck-image-art";
   art.style.background = cardGradient(entry.card.civilizations[0]);
-  if (entry.card.image_path) {
-    art.style.backgroundImage = `url('${entry.card.image_path}')`;
+  const previewImage = entry.card.illustration_path || entry.card.image_path;
+  if (previewImage) {
+    art.style.backgroundImage = `url('${previewImage}')`;
     art.style.backgroundSize = "cover";
     art.style.backgroundPosition = "center";
   }
@@ -3589,6 +3601,30 @@ async function sendAdminNotification() {
     renderAdminPage();
   } catch (error) {
     setStatus(error.message || "Admin notification failed.", "error");
+  }
+}
+
+async function verifyAdminUser(profileId) {
+  if (!state.activeProfileId || !activeProfile()?.is_admin) {
+    setStatus("Admin access is required.", "error");
+    return;
+  }
+  try {
+    const payload = await fetchJson(`${API_BASE}/admin/verify`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        admin_profile_id: state.activeProfileId,
+        target_profile_id: profileId
+      })
+    });
+    setStatus(payload.message || "User verified.", "success");
+    await hydrateProfiles();
+    await loadAdminOverview();
+    renderAuthNavigation();
+    renderAdminPage();
+  } catch (error) {
+    setStatus(error.message || "Verification update failed.", "error");
   }
 }
 

@@ -16,6 +16,7 @@ class CardOut(BaseModel):
     set_name: str | None = None
     collector_number: str | None = None
     image_path: str | None = None
+    illustration_path: str | None = None
 
 
 class CardListResponse(BaseModel):
@@ -222,6 +223,11 @@ class AdminNotificationIn(BaseModel):
     admin_profile_id: int
     message: str
     target_profile_id: int | None = None
+
+
+class AdminVerifyIn(BaseModel):
+    admin_profile_id: int
+    target_profile_id: int
 
 
 class AdminBanIn(BaseModel):
