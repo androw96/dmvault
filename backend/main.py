@@ -828,7 +828,7 @@ def resend_verification(payload: VerificationResendIn, request: Request, db: Ses
                 message="Email sending is not configured locally, so you can verify directly from the app.",
                 verification_url=build_verification_link(raw_token),
             )
-        return GenericMessageOut(status="ok", message="The account exists, but the verification email could not be sent right now.")
+        return GenericMessageOut(status="error", message="The account exists, but the verification email could not be sent right now.")
 
     return GenericMessageOut(status="ok", message="If the account exists, a verification email has been sent.")
 

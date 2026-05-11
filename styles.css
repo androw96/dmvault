@@ -2367,3 +2367,215 @@ input[type="range"] {
     font-size: 0.96rem;
   }
 }
+
+
+@media (max-width: 820px) {
+  body {
+    overflow-x: hidden;
+  }
+
+  .page-shell {
+    width: min(100% - 12px, 100%);
+    padding-top: 12px;
+    gap: 12px;
+  }
+
+  .panel,
+  .hero,
+  .page-hero,
+  .welcome-hero,
+  .deck-workspace,
+  .profile-card,
+  .admin-panel,
+  .legal-footer,
+  .legal-page {
+    padding: 18px 14px;
+    border-radius: 20px;
+  }
+
+  .top-nav {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 12px;
+    padding: 12px;
+    border-radius: 22px;
+  }
+
+  .menu-logo-link {
+    width: 54px;
+    height: 54px;
+    margin: 0 auto;
+  }
+
+  .top-nav-links {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 10px;
+    width: 100%;
+  }
+
+  .nav-dropdown,
+  .nav-link,
+  .nav-login-link,
+  .nav-logout-link,
+  .nav-notification-dropdown,
+  .nav-avatar-dropdown {
+    width: 100%;
+    margin-left: 0;
+  }
+
+  .nav-link,
+  .nav-dropdown summary,
+  .nav-avatar-trigger,
+  .nav-bell-trigger {
+    width: 100%;
+    min-height: 48px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-sizing: border-box;
+  }
+
+  .nav-dropdown-menu,
+  .profile-dropdown-menu,
+  .notification-dropdown-menu {
+    position: static;
+    left: auto;
+    top: auto;
+    width: 100%;
+    min-width: 0;
+    margin-top: 8px;
+    max-height: none;
+  }
+
+  .welcome-hero {
+    padding: 24px 14px 20px;
+    gap: 12px;
+  }
+
+  .welcome-logo {
+    width: min(52vw, 180px);
+  }
+
+  .welcome-actions,
+  .builder-entry-actions,
+  .builder-modify-actions,
+  .hero-actions,
+  .profile-deck-actions,
+  .cookie-consent-actions {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+
+  .welcome-actions .primary-button,
+  .welcome-actions .ghost-button,
+  .builder-entry-button,
+  .hero-actions .primary-button,
+  .hero-actions .ghost-button,
+  .profile-inline-button,
+  .cookie-consent-actions .primary-button,
+  .cookie-consent-actions .ghost-button {
+    width: 100%;
+  }
+
+  .create-profile-grid,
+  .auth-grid,
+  .admin-two-column,
+  .deck-title-row,
+  .workspace-top,
+  .builder-bottom-grid,
+  .builder-stat-cards,
+  .profile-metrics,
+  .filters,
+  .explore-controls,
+  .inline-field-row {
+    grid-template-columns: 1fr !important;
+  }
+
+  .field input,
+  .field select,
+  .field textarea,
+  button,
+  .primary-button,
+  .ghost-button,
+  .nav-link {
+    font-size: 16px;
+  }
+
+  .deck-list-image-mode,
+  .catalog-grid,
+  .profile-decks,
+  .profile-decks.compact-grid {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+
+  .deck-image-card,
+  .profile-deck-card {
+    min-height: unset;
+    padding: 12px;
+  }
+
+  .deck-image-art,
+  .profile-deck-cover {
+    min-height: 180px;
+  }
+
+  .modal-panel,
+  .auth-modal-panel {
+    width: min(100vw - 18px, 560px);
+    max-height: calc(100vh - 20px);
+    overflow: auto;
+    padding: 18px 14px;
+  }
+
+  .notification-item.is-unread::before {
+    left: 10px;
+    top: 12px;
+  }
+
+  .notification-item {
+    padding-left: 24px;
+  }
+}
+
+@media (max-width: 540px) {
+  .page-shell {
+    width: min(100% - 8px, 100%);
+    padding-top: 8px;
+  }
+
+  .panel,
+  .hero,
+  .page-hero,
+  .welcome-hero,
+  .deck-workspace,
+  .profile-card,
+  .admin-panel,
+  .legal-footer,
+  .legal-page {
+    padding: 16px 12px;
+    border-radius: 18px;
+  }
+
+  .welcome-hero h1,
+  .page-hero h1 {
+    font-size: clamp(1.9rem, 9vw, 2.5rem);
+  }
+
+  .section-label,
+  .hero-text,
+  .welcome-message,
+  .legal-footer-copy p,
+  .legal-footer-meta {
+    font-size: 0.92rem;
+  }
+
+  .menu-logo-link,
+  .nav-avatar,
+  .nav-bell-trigger {
+    width: 50px;
+    height: 50px;
+  }
+}

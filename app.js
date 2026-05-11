@@ -3505,15 +3505,16 @@ async function resendVerificationEmail() {
     setStatus(error.message || "Verification email resend failed.", "error");
     return;
   }
+  const level = payload.status === "error" ? "error" : "success";
   setAuthModalStatus(
     payload.message || "If the account exists, a verification email has been sent.",
-    "success",
+    level,
     payload.verification_url ? { label: "Verify now", href: payload.verification_url } : null,
     "login"
   );
   setStatus(
     payload.message || "If the account exists, a verification email has been sent.",
-    "success",
+    level,
     payload.verification_url ? { label: "Verify now", href: payload.verification_url } : null
   );
 }
