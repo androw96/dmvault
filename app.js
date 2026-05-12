@@ -272,6 +272,7 @@ const elements = {
   adminNotifyMessage: document.querySelector("#admin-notify-message"),
   adminNotifyButton: document.querySelector("#admin-notify-button"),
   adminEmailTarget: document.querySelector("#admin-email-target"),
+  adminEmailManual: document.querySelector("#admin-email-manual"),
   adminEmailSubject: document.querySelector("#admin-email-subject"),
   adminEmailMessage: document.querySelector("#admin-email-message"),
   adminEmailButton: document.querySelector("#admin-email-button"),
@@ -386,6 +387,10 @@ function openCardDetail(card) {
   if (!card?.id) {
     return;
   }
+  if (window.location.protocol === "file:") {
+    window.location.assign(`./card-detail.html?id=${encodeURIComponent(card.id)}`);
+    return;
+  }
   window.location.assign(`/cards/${card.id}`);
 }
 
@@ -393,6 +398,12 @@ async function loadCardDetailPage() {
   const cardId = currentCardDetailId();
   if (!cardId) {
     renderCardDetail(null);
+    return;
+  }
+  if (window.location.protocol === "file:") {
+    await loadAllCards();
+    const card = state.allCards.find((item) => item.id === cardId) || null;
+    renderCardDetail(card);
     return;
   }
   try {
@@ -511,6 +522,20 @@ function ensureMobileNavToggle() {
       sync();
     }
   });
+  for (const trigger of document.querySelectorAll(".nav-avatar-trigger")) {
+    if (trigger.dataset.mobileProfileBound === "true") {
+      continue;
+    }
+    trigger.dataset.mobileProfileBound = "true";
+    trigger.addEventListener("click", (event) => {
+      if (window.innerWidth > 820) {
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+      window.location.assign(window.location.protocol === "file:" ? "./profile.html" : "/profile");
+    });
+  }
   sync();
 }
 
@@ -3906,10 +3931,11 @@ async function sendAdminEmail() {
     return;
   }
   const target = Number(elements.adminEmailTarget?.value || 0);
+  const manualEmail = elements.adminEmailManual?.value.trim() ?? "";
   const subject = elements.adminEmailSubject?.value.trim() ?? "";
   const message = elements.adminEmailMessage?.value.trim() ?? "";
-  if (!target) {
-    setStatus("Choose a user to email.", "error");
+  if (!target && !manualEmail) {
+    setStatus("Choose a user or enter an email address manually.", "error");
     return;
   }
   if (!subject || !message) {
@@ -3922,11 +3948,18 @@ async function sendAdminEmail() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         admin_profile_id: state.activeProfileId,
-        target_profile_id: target,
+        target_profile_id: target || null,
+        target_email: manualEmail || null,
         subject,
         message
       })
     });
+    if (elements.adminEmailTarget) {
+      elements.adminEmailTarget.value = "";
+    }
+    if (elements.adminEmailManual) {
+      elements.adminEmailManual.value = "";
+    }
     if (elements.adminEmailSubject) {
       elements.adminEmailSubject.value = "";
     }

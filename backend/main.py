@@ -1144,18 +1144,22 @@ def admin_notify(payload: AdminNotificationIn, request: Request, db: Session = D
 def admin_email(payload: AdminEmailIn, request: Request, db: Session = Depends(get_db)) -> GenericMessageOut:
     enforce_rate_limit("admin_notify", request, extra_key=str(payload.admin_profile_id))
     admin = require_admin(payload.admin_profile_id, db)
-    target = db.get(Profile, payload.target_profile_id)
-    if not target:
-      raise HTTPException(status_code=404, detail="Target profile not found.")
-    if not target.email:
-      raise HTTPException(status_code=400, detail="That user does not have an email address on file.")
+    target = db.get(Profile, payload.target_profile_id) if payload.target_profile_id else None
+    target_email = normalize_email(payload.target_email) if payload.target_email else None
+    if not target and not target_email:
+        raise HTTPException(status_code=400, detail="Choose a target user or enter an email address manually.")
+    if target and not target.email and not target_email:
+        raise HTTPException(status_code=400, detail="That user does not have an email address on file.")
 
     subject = payload.subject.strip()
     message = payload.message.strip()
     if not subject:
-      raise HTTPException(status_code=400, detail="Email subject is required.")
+        raise HTTPException(status_code=400, detail="Email subject is required.")
     if not message:
-      raise HTTPException(status_code=400, detail="Email message is required.")
+        raise HTTPException(status_code=400, detail="Email message is required.")
+
+    recipient_email = target_email or normalize_email(target.email or "")
+    recipient_name = target.username if target else "Paladin's Vault user"
 
     html_body = f"""\
 <html>
@@ -1164,7 +1168,7 @@ def admin_email(payload: AdminEmailIn, request: Request, db: Session = Depends(g
       <div style="padding:24px;border-radius:24px;background:linear-gradient(180deg,#0c1724,#09111d);border:1px solid rgba(167,220,255,.18);">
         <p style="margin:0 0 12px;color:#86dfff;font-size:12px;letter-spacing:.14em;text-transform:uppercase;">Paladin's Vault Admin</p>
         <h1 style="margin:0 0 18px;font-size:28px;line-height:1.15;color:#f5fcff;">{subject}</h1>
-        <p style="margin:0 0 18px;color:#d7ecff;line-height:1.75;">Hello {target.username},</p>
+        <p style="margin:0 0 18px;color:#d7ecff;line-height:1.75;">Hello {recipient_name},</p>
         <div style="margin:0 0 18px;color:#d7ecff;line-height:1.8;white-space:pre-line;">{message}</div>
         <p style="margin:24px 0 0;color:#9fc4df;font-size:14px;line-height:1.7;">This message was sent from the Paladin's Vault admin dashboard.</p>
       </div>
@@ -1174,15 +1178,16 @@ def admin_email(payload: AdminEmailIn, request: Request, db: Session = Depends(g
 """
     email = EmailMessage(
         subject=subject,
-        to_email=target.email,
+        to_email=recipient_email,
         html=html_body,
-        text=f"Hello {target.username},\n\n{message}\n\nThis message was sent from the Paladin's Vault admin dashboard.",
+        text=f"Hello {recipient_name},\n\n{message}\n\nThis message was sent from the Paladin's Vault admin dashboard.",
     )
     send_email_message(email)
-    db.add(Notification(profile_id=target.id, actor_profile_id=admin.id, type="admin_message", message=f"Admin email sent: {subject}", created_at=datetime.utcnow()))
-    create_admin_audit(db, admin.id, "email_user", target_profile_id=target.id, detail=f"{target.email} • {subject}")
+    if target:
+        db.add(Notification(profile_id=target.id, actor_profile_id=admin.id, type="admin_message", message=f"Admin email sent: {subject}", created_at=datetime.utcnow()))
+    create_admin_audit(db, admin.id, "email_user", target_profile_id=target.id if target else None, detail=f"{recipient_email} • {subject}")
     db.commit()
-    return GenericMessageOut(status="ok", message=f"Email sent to {target.username} at {target.email}.")
+    return GenericMessageOut(status="ok", message=f"Email sent to {recipient_name} at {recipient_email}.")
 
 
 @app.post("/api/admin/verify", response_model=GenericMessageOut)

@@ -230,7 +230,8 @@ class AdminNotificationIn(BaseModel):
 
 class AdminEmailIn(BaseModel):
     admin_profile_id: int
-    target_profile_id: int
+    target_profile_id: int | None = None
+    target_email: str | None = None
     subject: str
     message: str
 
