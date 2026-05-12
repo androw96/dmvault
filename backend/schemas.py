@@ -5,6 +5,7 @@ from pydantic import BaseModel, Field
 
 class CardOut(BaseModel):
     id: int
+    slug: str
     name: str
     civilizations: list[str]
     cost: int
@@ -15,6 +16,8 @@ class CardOut(BaseModel):
     rarity: str | None = None
     set_name: str | None = None
     collector_number: str | None = None
+    illustrator: str | None = None
+    flavor: str | None = None
     image_path: str | None = None
     illustration_path: str | None = None
 
@@ -225,6 +228,13 @@ class AdminNotificationIn(BaseModel):
     target_profile_id: int | None = None
 
 
+class AdminEmailIn(BaseModel):
+    admin_profile_id: int
+    target_profile_id: int
+    subject: str
+    message: str
+
+
 class AdminVerifyIn(BaseModel):
     admin_profile_id: int
     target_profile_id: int
@@ -249,6 +259,7 @@ class AdminOverviewOut(BaseModel):
     private_decks: int
     banned_profiles: int
     database_tables: dict[str, int]
+    email_diagnostics: dict[str, str | bool | None] = {}
     recent_profiles: list[ProfileOut]
     all_profiles: list[ProfileOut]
     recent_decks: list[DeckSummaryOut]

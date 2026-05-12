@@ -46,6 +46,7 @@ const AVATAR_PRESET_FOCUS = {
 const page = document.body.dataset.page ?? "welcome";
 const isBuilderLandingPage = page === "builder";
 const isDeckEditorPage = page === "deck-editor";
+const isCardDetailPage = page === "card-detail";
 const isBuilderExperiencePage = isBuilderLandingPage || isDeckEditorPage;
 const hasPreloadedBuilderDeck = window.location.pathname.match(/^\/share\/[a-z0-9-]+$/i)
   || (isDeckEditorPage && new URLSearchParams(window.location.search).has("deck"));
@@ -99,7 +100,9 @@ const state = {
   deckHistory: [],
   deleteDeckTarget: null,
   deck: {},
-  cardsLoaded: false
+  cardsLoaded: false,
+  cardSearchDebounce: null,
+  cardsRequestId: 0
 };
 
 const elements = {
@@ -142,6 +145,24 @@ const elements = {
   printPages: document.querySelector("#print-pages"),
   cardTemplate: document.querySelector("#card-template"),
   deckRowTemplate: document.querySelector("#deck-row-template"),
+  cardDetailLayout: document.querySelector("#card-detail-layout"),
+  cardDetailEmpty: document.querySelector("#card-detail-empty"),
+  cardDetailTitle: document.querySelector("#card-detail-title"),
+  cardDetailSubtitle: document.querySelector("#card-detail-subtitle"),
+  cardDetailImage: document.querySelector("#card-detail-image"),
+  cardDetailName: document.querySelector("#card-detail-name"),
+  cardDetailCost: document.querySelector("#card-detail-cost"),
+  cardDetailCivs: document.querySelector("#card-detail-civs"),
+  cardDetailType: document.querySelector("#card-detail-type"),
+  cardDetailRace: document.querySelector("#card-detail-race"),
+  cardDetailPower: document.querySelector("#card-detail-power"),
+  cardDetailRarity: document.querySelector("#card-detail-rarity"),
+  cardDetailText: document.querySelector("#card-detail-text"),
+  cardDetailSet: document.querySelector("#card-detail-set"),
+  cardDetailNumber: document.querySelector("#card-detail-number"),
+  cardDetailIllustrator: document.querySelector("#card-detail-illustrator"),
+  cardDetailFlavorWrap: document.querySelector("#card-detail-flavor-wrap"),
+  cardDetailFlavor: document.querySelector("#card-detail-flavor"),
   resetFiltersButton: document.querySelector("#reset-filters-button"),
   clearDeckButton: document.querySelector("#clear-deck-button"),
   saveDeckButton: document.querySelector("#save-deck-button"),
@@ -246,9 +267,14 @@ const elements = {
   adminUsersByMonth: document.querySelector("#admin-users-by-month"),
   adminDecksByMonth: document.querySelector("#admin-decks-by-month"),
   adminDatabaseTables: document.querySelector("#admin-database-tables"),
+  adminEmailDiagnostics: document.querySelector("#admin-email-diagnostics"),
   adminNotifyTarget: document.querySelector("#admin-notify-target"),
   adminNotifyMessage: document.querySelector("#admin-notify-message"),
   adminNotifyButton: document.querySelector("#admin-notify-button"),
+  adminEmailTarget: document.querySelector("#admin-email-target"),
+  adminEmailSubject: document.querySelector("#admin-email-subject"),
+  adminEmailMessage: document.querySelector("#admin-email-message"),
+  adminEmailButton: document.querySelector("#admin-email-button"),
   adminUserList: document.querySelector("#admin-user-list"),
   adminDeckList: document.querySelector("#admin-deck-list"),
   adminAuditLog: document.querySelector("#admin-audit-log"),
@@ -279,6 +305,7 @@ async function initialize() {
   ensureAccountDeleteModal();
   ensureAuthModalEnhancements();
   ensureNotificationMenu();
+  ensureMobileNavToggle();
   ensureCookieConsentBanner();
   setActiveNav();
   bindEvents();
@@ -296,7 +323,10 @@ async function initialize() {
 
   if (needsCards(page)) {
     await hydrateFilters();
-    await loadCards(160);
+    const shouldPreloadCards = !isDeckEditorPage || state.filters.search || state.filters.civilization !== "all" || state.filters.type !== "all" || state.filters.maxCost !== state.filterDefaults.maxCost;
+    if (shouldPreloadCards) {
+      await loadCards(isDeckEditorPage ? 60 : 160);
+    }
   }
   if (page === "profile") {
     await loadAllCards();
@@ -313,6 +343,9 @@ async function initialize() {
   }
   if (page === "profile") {
     await maybeLoadViewedProfile();
+  }
+  if (isCardDetailPage) {
+    await loadCardDetailPage();
   }
   if (page === "admin" && state.activeProfileId) {
     await loadAdminOverview();
@@ -338,6 +371,157 @@ async function initialize() {
   renderHeaderStats();
   renderAdminPage();
   renderContactPage();
+}
+
+function currentCardDetailId() {
+  const match = window.location.pathname.match(/\/cards\/(\d+)$/);
+  if (match) {
+    return Number(match[1]);
+  }
+  const queryId = new URLSearchParams(window.location.search).get("id");
+  return queryId && /^\d+$/.test(queryId) ? Number(queryId) : null;
+}
+
+function openCardDetail(card) {
+  if (!card?.id) {
+    return;
+  }
+  window.location.assign(`/cards/${card.id}`);
+}
+
+async function loadCardDetailPage() {
+  const cardId = currentCardDetailId();
+  if (!cardId) {
+    renderCardDetail(null);
+    return;
+  }
+  try {
+    const card = await fetchJson(`${API_BASE}/cards/${cardId}`);
+    renderCardDetail(card);
+  } catch {
+    renderCardDetail(null);
+  }
+}
+
+function renderCardDetail(card) {
+  if (!isCardDetailPage || !elements.cardDetailLayout || !elements.cardDetailEmpty) {
+    return;
+  }
+  if (!card) {
+    document.title = "Paladin's Vault • Card Not Found";
+    elements.cardDetailLayout.hidden = true;
+    elements.cardDetailEmpty.innerHTML = `<p class="hero-text">This card could not be found. Try returning to the full card browser.</p>`;
+    return;
+  }
+
+  document.title = `Paladin's Vault • ${card.name}`;
+  elements.cardDetailLayout.hidden = false;
+  elements.cardDetailEmpty.hidden = true;
+  if (elements.cardDetailTitle) {
+    elements.cardDetailTitle.textContent = card.name;
+  }
+  if (elements.cardDetailSubtitle) {
+    elements.cardDetailSubtitle.textContent = `${card.type} • ${card.race_label} • ${card.cost} mana`;
+  }
+  if (elements.cardDetailImage) {
+    elements.cardDetailImage.src = card.image_path || card.illustration_path || DEFAULT_LOGO_URL;
+    elements.cardDetailImage.alt = card.name;
+  }
+  if (elements.cardDetailName) {
+    elements.cardDetailName.textContent = card.name;
+  }
+  if (elements.cardDetailCost) {
+    elements.cardDetailCost.textContent = `${card.cost}`;
+  }
+  if (elements.cardDetailCivs) {
+    elements.cardDetailCivs.replaceChildren();
+    for (const civ of card.civilizations || []) {
+      const chip = document.createElement("span");
+      chip.className = "chip";
+      chip.textContent = civ;
+      elements.cardDetailCivs.append(chip);
+    }
+  }
+  if (elements.cardDetailType) {
+    elements.cardDetailType.textContent = card.type || "-";
+  }
+  if (elements.cardDetailRace) {
+    elements.cardDetailRace.textContent = card.race_label || "-";
+  }
+  if (elements.cardDetailPower) {
+    elements.cardDetailPower.textContent = card.power || "-";
+  }
+  if (elements.cardDetailRarity) {
+    elements.cardDetailRarity.textContent = card.rarity || "-";
+  }
+  if (elements.cardDetailText) {
+    elements.cardDetailText.textContent = card.text || "No ability text available.";
+  }
+  if (elements.cardDetailSet) {
+    elements.cardDetailSet.textContent = card.set_name || "-";
+  }
+  if (elements.cardDetailNumber) {
+    elements.cardDetailNumber.textContent = card.collector_number || "-";
+  }
+  if (elements.cardDetailIllustrator) {
+    elements.cardDetailIllustrator.textContent = card.illustrator || "-";
+  }
+  if (elements.cardDetailFlavorWrap && elements.cardDetailFlavor) {
+    const hasFlavor = Boolean(card.flavor && card.flavor.trim());
+    elements.cardDetailFlavorWrap.hidden = !hasFlavor;
+    elements.cardDetailFlavor.textContent = hasFlavor ? card.flavor : "";
+  }
+}
+
+function ensureMobileNavToggle() {
+  const nav = document.querySelector(".top-nav");
+  const navLinks = document.querySelector(".top-nav-links");
+  const logo = document.querySelector(".menu-logo-link");
+  if (!nav || !navLinks || !logo || nav.querySelector("[data-mobile-nav-toggle]")) {
+    return;
+  }
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "nav-hamburger-button";
+  button.dataset.mobileNavToggle = "true";
+  button.setAttribute("aria-label", "Open navigation menu");
+  button.setAttribute("aria-expanded", "false");
+  button.innerHTML = '<span></span><span></span><span></span>';
+  logo.insertAdjacentElement("afterend", button);
+  const sync = () => {
+    const open = nav.classList.contains("is-mobile-open");
+    button.setAttribute("aria-expanded", open ? "true" : "false");
+    button.setAttribute("aria-label", open ? "Close navigation menu" : "Open navigation menu");
+  };
+  button.addEventListener("click", () => {
+    nav.classList.toggle("is-mobile-open");
+    sync();
+  });
+  for (const link of navLinks.querySelectorAll("a, button, summary")) {
+    link.addEventListener("click", () => {
+      if (window.innerWidth <= 820 && !link.closest(".nav-avatar-dropdown") && !link.closest(".nav-notification-dropdown")) {
+        nav.classList.remove("is-mobile-open");
+        sync();
+      }
+    });
+  }
+  window.addEventListener("resize", () => {
+    if (window.innerWidth > 820) {
+      nav.classList.remove("is-mobile-open");
+      sync();
+    }
+  });
+  sync();
+}
+
+function scheduleCardSearch(limit = null) {
+  if (state.cardSearchDebounce) {
+    window.clearTimeout(state.cardSearchDebounce);
+  }
+  state.cardSearchDebounce = window.setTimeout(async () => {
+    await loadCards(limit ?? (isDeckEditorPage ? 60 : 160));
+    renderCards();
+  }, 180);
 }
 
 function ensureNotificationMenu() {
@@ -545,29 +729,25 @@ function bindEvents() {
     renderBuilder();
   });
 
-  elements.searchInput?.addEventListener("input", async (event) => {
+  elements.searchInput?.addEventListener("input", (event) => {
     state.filters.search = event.target.value.trim();
-    await loadCards(160);
-    renderCards();
+    scheduleCardSearch(isDeckEditorPage ? 48 : 120);
   });
 
-  elements.civilizationFilter?.addEventListener("change", async (event) => {
+  elements.civilizationFilter?.addEventListener("change", (event) => {
     state.filters.civilization = event.target.value;
-    await loadCards(160);
-    renderCards();
+    scheduleCardSearch(isDeckEditorPage ? 48 : 120);
   });
 
-  elements.typeFilter?.addEventListener("change", async (event) => {
+  elements.typeFilter?.addEventListener("change", (event) => {
     state.filters.type = event.target.value;
-    await loadCards(160);
-    renderCards();
+    scheduleCardSearch(isDeckEditorPage ? 48 : 120);
   });
 
-  elements.costFilter?.addEventListener("input", async (event) => {
+  elements.costFilter?.addEventListener("input", (event) => {
     state.filters.maxCost = Number(event.target.value);
     elements.costFilterValue.textContent = event.target.value;
-    await loadCards(160);
-    renderCards();
+    scheduleCardSearch(isDeckEditorPage ? 48 : 120);
   });
 
   elements.printDeckSelect?.addEventListener("change", async (event) => {
@@ -625,6 +805,7 @@ function bindEvents() {
   }
   elements.textImportButton?.addEventListener("click", importTextDeck);
   elements.adminNotifyButton?.addEventListener("click", sendAdminNotification);
+  elements.adminEmailButton?.addEventListener("click", sendAdminEmail);
   elements.contactSubmitButton?.addEventListener("click", submitContactMessage);
 }
 
@@ -730,7 +911,11 @@ async function loadCards(limit = 160) {
   params.set("max_cost", String(state.filters.maxCost));
   params.set("limit", String(limit));
 
+  const requestId = ++state.cardsRequestId;
   const payload = await fetchJson(`${API_BASE}/cards?${params.toString()}`);
+  if (requestId !== state.cardsRequestId) {
+    return;
+  }
   state.cards = payload.items;
   for (const card of payload.items) {
     state.cardIndex[String(card.id)] = card;
@@ -1243,6 +1428,28 @@ function renderAdminPage() {
     }
   }
 
+  if (elements.adminEmailDiagnostics) {
+    const diagnostics = overview.email_diagnostics || {};
+    elements.adminEmailDiagnostics.replaceChildren();
+    const cards = [
+      ["Mode", diagnostics.delivery_mode || "disabled"],
+      ["From", diagnostics.from_email || "Not configured"],
+      ["Base URL", diagnostics.app_base_url || "Not configured"],
+      ["Resend", diagnostics.resend_configured ? "Configured" : "Missing"],
+      ["SMTP fallback", diagnostics.smtp_fallback_configured ? "Configured" : "Missing"],
+    ];
+    for (const [label, value] of cards) {
+      const item = document.createElement("div");
+      item.className = "admin-email-row";
+      item.innerHTML = `<strong>${escapeHtml(label)}</strong><span>${escapeHtml(String(value))}</span>`;
+      elements.adminEmailDiagnostics.append(item);
+    }
+    const lastError = document.createElement("div");
+    lastError.className = diagnostics.last_error ? "admin-email-error is-visible" : "admin-email-error";
+    lastError.textContent = diagnostics.last_error || "No recent email delivery error recorded.";
+    elements.adminEmailDiagnostics.append(lastError);
+  }
+
   if (elements.adminNotifyTarget) {
     const current = elements.adminNotifyTarget.value;
     elements.adminNotifyTarget.innerHTML = '<option value="">All non-banned users</option>';
@@ -1256,20 +1463,35 @@ function renderAdminPage() {
     elements.adminNotifyTarget.value = current;
   }
 
+  if (elements.adminEmailTarget) {
+    const current = elements.adminEmailTarget.value;
+    elements.adminEmailTarget.innerHTML = '<option value="">Select a user</option>';
+    for (const profile of overview.all_profiles || []) {
+      if (profile.is_banned || !profile.email || profile.id === state.activeProfileId) {
+        continue;
+      }
+      const option = document.createElement("option");
+      option.value = String(profile.id);
+      option.textContent = `${displayUsername(profile.username)} • ${profile.email}`;
+      elements.adminEmailTarget.append(option);
+    }
+    elements.adminEmailTarget.value = current;
+  }
+
   if (elements.adminUserList) {
     elements.adminUserList.replaceChildren();
     for (const profile of overview.all_profiles || []) {
       const row = document.createElement("article");
       row.className = "admin-user-row";
       row.innerHTML = `
-        <div>
+        <div class="admin-user-copy">
           <strong>${escapeHtml(displayUsername(profile.username))}</strong>
           <p>${escapeHtml(profile.email || "No email")}</p>
           <small>${profile.is_admin ? "Admin" : "User"} • ${profile.is_banned ? "Banned" : "Active"} • ${profile.email_verified ? "Verified" : "Unverified"}</small>
         </div>
       `;
       const actions = document.createElement("div");
-      actions.className = "hero-actions";
+      actions.className = "admin-user-actions";
       if (!profile.is_admin && profile.id !== state.activeProfileId) {
         if (!profile.email_verified) {
           const verifyButton = document.createElement("button");
@@ -1306,17 +1528,19 @@ function renderAdminPage() {
   if (elements.adminContactInbox) {
     elements.adminContactInbox.replaceChildren();
     for (const item of overview.recent_contact_messages || []) {
-      const row = document.createElement("div");
-      row.className = "admin-month-row";
+      const row = document.createElement("article");
+      row.className = "admin-message-card";
       row.innerHTML = `
-        <strong>${escapeHtml(item.subject || "Message")}</strong>
-        <span>${escapeHtml(item.created_at_label || "")}</span>
+        <div class="admin-message-head">
+          <strong>${escapeHtml(item.subject || "Message")}</strong>
+          <span>${escapeHtml(item.created_at_label || "")}</span>
+        </div>
       `;
       const meta = document.createElement("p");
-      meta.className = "hero-text";
+      meta.className = "admin-message-meta";
       meta.innerHTML = `<strong>${escapeHtml(displayUsername(item.username || "user"))}</strong> • ${escapeHtml(item.email || "")}`;
       const body = document.createElement("p");
-      body.className = "hero-text";
+      body.className = "admin-message-body";
       body.textContent = item.message || "";
       row.append(meta, body);
       elements.adminContactInbox.append(row);
@@ -1332,14 +1556,16 @@ function renderAdminPage() {
   if (elements.adminAuditLog) {
     elements.adminAuditLog.replaceChildren();
     for (const item of overview.audit_log || []) {
-      const row = document.createElement("div");
-      row.className = "admin-month-row";
+      const row = document.createElement("article");
+      row.className = "admin-audit-entry";
       row.innerHTML = `
-        <strong>${escapeHtml(item.action || "action")}</strong>
-        <span>${escapeHtml(item.created_at || "")}</span>
+        <div class="admin-audit-head">
+          <strong>${escapeHtml(item.action || "action")}</strong>
+          <span>${escapeHtml(item.created_at || "")}</span>
+        </div>
       `;
       const detail = document.createElement("p");
-      detail.className = "hero-text";
+      detail.className = "admin-audit-detail";
       detail.textContent = item.detail || (item.target_profile_id ? `Target profile ID: ${item.target_profile_id}` : "No extra detail.");
       row.append(detail);
       elements.adminAuditLog.append(row);
@@ -2594,17 +2820,31 @@ async function exportViewPng() {
   setStatus(`Export completed: ${deckSnapshotTitle()} view PNG`, "success");
 }
 
-function loadCardImage(card) {
-  return new Promise((resolve) => {
-    if (!card.image_path) {
-      resolve({ card, image: null });
-      return;
+async function loadCardImage(card) {
+  if (!card.image_path) {
+    return { card, image: null };
+  }
+  const imageUrl = new URL(card.image_path, window.location.origin).toString();
+  try {
+    const response = await fetch(imageUrl, { credentials: "same-origin" });
+    if (!response.ok) {
+      throw new Error(`Image request failed: ${response.status}`);
     }
+    const blob = await response.blob();
+    const objectUrl = URL.createObjectURL(blob);
     const image = new Image();
-    image.onload = () => resolve({ card, image });
-    image.onerror = () => resolve({ card, image: null });
-    image.src = card.image_path;
-  });
+    image.decoding = "async";
+    const loaded = await new Promise((resolve, reject) => {
+      image.onload = () => resolve(image);
+      image.onerror = () => reject(new Error("Image decode failed."));
+      image.src = objectUrl;
+    });
+    URL.revokeObjectURL(objectUrl);
+    return { card, image: loaded };
+  } catch (error) {
+    console.warn("PNG export image load failed", card.name, error);
+    return { card, image: null };
+  }
 }
 
 function truncateLabel(value, maxLength) {
@@ -2728,15 +2968,36 @@ function renderBuilder() {
 
   for (const entry of entries) {
     const fragment = elements.deckRowTemplate.content.cloneNode(true);
-    fragment.querySelector(".deck-row-name").textContent = entry.card.name;
-    fragment.querySelector(".deck-row-meta").textContent = `${entry.card.civilizations.join(" / ")} • ${entry.card.type} • ${entry.card.cost} mana`;
-    fragment.querySelector(".deck-row-count").textContent = `x${entry.count}`;
+    const row = fragment.querySelector(".deck-row");
+    const rowName = fragment.querySelector(".deck-row-name");
+    const rowMeta = fragment.querySelector(".deck-row-meta");
+    const rowCount = fragment.querySelector(".deck-row-count");
+    rowName.textContent = entry.card.name;
+    rowMeta.textContent = `${entry.card.civilizations.join(" / ")} • ${entry.card.type} • ${entry.card.cost} mana`;
+    rowCount.textContent = `x${entry.count}`;
+    row.classList.add("is-clickable");
+    row.tabIndex = 0;
+    row.setAttribute("role", "link");
+    row.setAttribute("aria-label", `Open ${entry.card.name} card details`);
+    row.addEventListener("click", () => openCardDetail(entry.card));
+    row.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        openCardDetail(entry.card);
+      }
+    });
     const incrementButton = fragment.querySelector(".increment-button");
     const decrementButton = fragment.querySelector(".decrement-button");
     incrementButton.disabled = state.deckReadOnly;
     decrementButton.disabled = state.deckReadOnly;
-    incrementButton.addEventListener("click", () => addCardToDeck(entry.card.id));
-    decrementButton.addEventListener("click", () => removeCardFromDeck(entry.card.id));
+    incrementButton.addEventListener("click", (event) => {
+      event.stopPropagation();
+      addCardToDeck(entry.card.id);
+    });
+    decrementButton.addEventListener("click", (event) => {
+      event.stopPropagation();
+      removeCardFromDeck(entry.card.id);
+    });
     elements.deckList.append(fragment);
   }
 
@@ -2768,15 +3029,30 @@ function renderCards() {
 
   for (const card of state.cards) {
     const fragment = elements.cardTemplate.content.cloneNode(true);
+    const cardItem = fragment.querySelector(".card-item");
     fragment.querySelector(".card-name").textContent = card.name;
     fragment.querySelector(".card-civilization").textContent = card.civilizations.join(" / ");
     fragment.querySelector(".card-cost").textContent = `${card.cost} mana`;
     fragment.querySelector(".card-type").textContent = `${card.type} • ${card.race_label}`;
     fragment.querySelector(".card-rules").textContent = card.text;
+    cardItem.classList.add("is-clickable");
+    cardItem.tabIndex = 0;
+    cardItem.setAttribute("role", "link");
+    cardItem.setAttribute("aria-label", `Open ${card.name} card details`);
+    cardItem.addEventListener("click", () => openCardDetail(card));
+    cardItem.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        openCardDetail(card);
+      }
+    });
     const addButton = fragment.querySelector(".add-button");
     addButton.disabled = state.deckReadOnly;
     addButton.textContent = state.deckReadOnly ? "Read Only" : "+ Add to Deck";
-    addButton.addEventListener("click", () => addCardToDeck(card.id));
+    addButton.addEventListener("click", (event) => {
+      event.stopPropagation();
+      addCardToDeck(card.id);
+    });
 
     const art = fragment.querySelector(".card-art");
     art.style.background = cardGradient(card.civilizations[0]);
@@ -2947,15 +3223,28 @@ function renderDeckHistory() {
 function buildDeckImageCard(entry) {
   const article = document.createElement("article");
   article.className = "deck-image-card";
+  article.classList.add("is-clickable");
+  article.tabIndex = 0;
+  article.setAttribute("role", "link");
+  article.setAttribute("aria-label", `Open ${entry.card.name} card details`);
+  article.addEventListener("click", () => openCardDetail(entry.card));
+  article.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      openCardDetail(entry.card);
+    }
+  });
 
   const art = document.createElement("div");
   art.className = "deck-image-art";
   art.style.background = cardGradient(entry.card.civilizations[0]);
-  const previewImage = entry.card.illustration_path || entry.card.image_path;
-  if (previewImage) {
-    art.style.backgroundImage = `url('${previewImage}')`;
-    art.style.backgroundSize = "cover";
-    art.style.backgroundPosition = "center";
+  if (entry.card.image_path) {
+    const cardImage = document.createElement("img");
+    cardImage.src = entry.card.image_path;
+    cardImage.alt = entry.card.name;
+    cardImage.loading = "lazy";
+    cardImage.decoding = "async";
+    art.append(cardImage);
   }
 
   const quantity = document.createElement("span");
@@ -2978,14 +3267,20 @@ function buildDeckImageCard(entry) {
   decrement.className = "small-button decrement-button";
   decrement.textContent = "-";
   decrement.disabled = state.deckReadOnly;
-  decrement.addEventListener("click", () => removeCardFromDeck(entry.card.id));
+  decrement.addEventListener("click", (event) => {
+    event.stopPropagation();
+    removeCardFromDeck(entry.card.id);
+  });
 
   const increment = document.createElement("button");
   increment.type = "button";
   increment.className = "small-button increment-button";
   increment.textContent = "+";
   increment.disabled = state.deckReadOnly;
-  increment.addEventListener("click", () => addCardToDeck(entry.card.id));
+  increment.addEventListener("click", (event) => {
+    event.stopPropagation();
+    addCardToDeck(entry.card.id);
+  });
 
   actions.append(decrement, increment);
   article.append(art, quantity, meta, actions);
@@ -3602,6 +3897,49 @@ async function sendAdminNotification() {
     renderAdminPage();
   } catch (error) {
     setStatus(error.message || "Admin notification failed.", "error");
+  }
+}
+
+async function sendAdminEmail() {
+  if (!state.activeProfileId || !activeProfile()?.is_admin) {
+    setStatus("Admin account required.", "error");
+    return;
+  }
+  const target = Number(elements.adminEmailTarget?.value || 0);
+  const subject = elements.adminEmailSubject?.value.trim() ?? "";
+  const message = elements.adminEmailMessage?.value.trim() ?? "";
+  if (!target) {
+    setStatus("Choose a user to email.", "error");
+    return;
+  }
+  if (!subject || !message) {
+    setStatus("Enter both an email subject and message.", "error");
+    return;
+  }
+  try {
+    const payload = await fetchJson(`${API_BASE}/admin/email`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        admin_profile_id: state.activeProfileId,
+        target_profile_id: target,
+        subject,
+        message
+      })
+    });
+    if (elements.adminEmailSubject) {
+      elements.adminEmailSubject.value = "";
+    }
+    if (elements.adminEmailMessage) {
+      elements.adminEmailMessage.value = "";
+    }
+    setStatus(payload.message || "Admin email sent.", "success");
+    await loadAdminOverview();
+    renderAdminPage();
+  } catch (error) {
+    setStatus(error.message || "Admin email sending failed.", "error");
+    await loadAdminOverview();
+    renderAdminPage();
   }
 }
 

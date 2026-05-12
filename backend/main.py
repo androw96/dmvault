@@ -26,6 +26,7 @@ from .models import AdminAuditLog, Card, ContactMessage, Deck, DeckItem, DeckLik
 from .pdf_service import build_deck_pdf
 from .schemas import (
     AdminBanIn,
+    AdminEmailIn,
     AdminNotificationIn,
     AdminOverviewOut,
     AdminVerifyIn,
@@ -78,6 +79,7 @@ DEFAULT_ADMIN_EMAIL = os.getenv("DEFAULT_ADMIN_EMAIL", "admin@paladinsvault.com"
 DEFAULT_ADMIN_USERNAME = slugify(os.getenv("DEFAULT_ADMIN_USERNAME", "paladins-vault-admin"))
 DEFAULT_ADMIN_PASSWORD = os.getenv("DEFAULT_ADMIN_PASSWORD", "PaladinsVaultAdmin96")
 RATE_LIMIT_BUCKETS: dict[str, list[float]] = {}
+LAST_EMAIL_ERROR: str | None = None
 RATE_LIMIT_RULES = {
     "register": (5, 900),
     "login": (10, 900),
@@ -258,6 +260,16 @@ def local_verification_fallback_enabled() -> bool:
     return not email_delivery_configured()
 
 
+def record_email_error(detail: str | None) -> None:
+    global LAST_EMAIL_ERROR
+    LAST_EMAIL_ERROR = detail.strip() if detail else None
+
+
+def clear_email_error() -> None:
+    global LAST_EMAIL_ERROR
+    LAST_EMAIL_ERROR = None
+
+
 def build_verification_link(raw_token: str) -> str:
     return f"{APP_BASE_URL}/api/auth/verify-email?token={raw_token}"
 
@@ -369,11 +381,16 @@ def send_via_resend_api(message: EmailMessage) -> None:
     try:
         with urlopen(request, timeout=20) as response:
             response.read()
+            clear_email_error()
     except HTTPError as exc:
         detail = exc.read().decode("utf-8", errors="ignore")
-        raise RuntimeError(f"Resend API error: {exc.code} {detail}") from exc
+        message_detail = f"Resend API error: {exc.code} {detail}"
+        record_email_error(message_detail)
+        raise RuntimeError(message_detail) from exc
     except URLError as exc:
-        raise RuntimeError(f"Resend API connection error: {exc}") from exc
+        message_detail = f"Resend API connection error: {exc}"
+        record_email_error(message_detail)
+        raise RuntimeError(message_detail) from exc
 
 
 def send_email_message(message: EmailMessage) -> None:
@@ -381,19 +398,25 @@ def send_email_message(message: EmailMessage) -> None:
         send_via_resend_api(message)
         return
     if not smtp_configured():
+        record_email_error("Email delivery is not configured.")
         raise RuntimeError("Email delivery is not configured.")
-    if SMTP_USE_TLS:
-        context = ssl.create_default_context()
-        with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=20) as server:
-            server.starttls(context=context)
-            if SMTP_USERNAME:
-                server.login(SMTP_USERNAME, SMTP_PASSWORD)
-            server.send_message(message)
-    else:
-        with smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT, timeout=20, context=ssl.create_default_context()) as server:
-            if SMTP_USERNAME:
-                server.login(SMTP_USERNAME, SMTP_PASSWORD)
-            server.send_message(message)
+    try:
+        if SMTP_USE_TLS:
+            context = ssl.create_default_context()
+            with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=20) as server:
+                server.starttls(context=context)
+                if SMTP_USERNAME:
+                    server.login(SMTP_USERNAME, SMTP_PASSWORD)
+                server.send_message(message)
+        else:
+            with smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT, timeout=20, context=ssl.create_default_context()) as server:
+                if SMTP_USERNAME:
+                    server.login(SMTP_USERNAME, SMTP_PASSWORD)
+                server.send_message(message)
+        clear_email_error()
+    except Exception as exc:
+        record_email_error(str(exc))
+        raise
 
 
 def issue_verification_token(profile: Profile, db: Session) -> str:
@@ -428,6 +451,7 @@ def enforce_password_policy(password: str) -> None:
 def card_to_out(card: Card) -> CardOut:
     return CardOut(
         id=card.id,
+        slug=card.slug,
         name=card.name,
         civilizations=card.civilizations.split("|"),
         cost=card.cost,
@@ -438,6 +462,8 @@ def card_to_out(card: Card) -> CardOut:
         rarity=card.rarity,
         set_name=card.set_name,
         collector_number=card.collector_number,
+        illustrator=card.illustrator,
+        flavor=card.flavor,
         image_path=format_image_path(card.id),
         illustration_path=format_illustration_path(card.name),
     )
@@ -601,6 +627,11 @@ def builder_editor_page() -> HTMLResponse:
 @app.get("/cards", response_class=HTMLResponse)
 def cards_page() -> HTMLResponse:
     return render_page("cards.html")
+
+
+@app.get("/cards/{card_id}", response_class=HTMLResponse)
+def card_detail_page(card_id: int) -> HTMLResponse:
+    return render_page("card-detail.html")
 
 
 @app.get("/import", response_class=HTMLResponse)
@@ -1058,6 +1089,14 @@ def admin_overview(admin_profile_id: int, db: Session = Depends(get_db)) -> Admi
             "likes": db.scalar(select(func.count(DeckLike.id))) or 0,
             "contact_messages": db.scalar(select(func.count(ContactMessage.id))) or 0,
         },
+        email_diagnostics={
+            "delivery_mode": "resend" if resend_configured() else ("smtp" if smtp_configured() else "disabled"),
+            "from_email": SMTP_FROM_EMAIL or None,
+            "app_base_url": APP_BASE_URL or None,
+            "resend_configured": resend_configured(),
+            "smtp_fallback_configured": smtp_configured(),
+            "last_error": LAST_EMAIL_ERROR,
+        },
         recent_profiles=recent_profiles,
         all_profiles=all_profiles,
         recent_decks=recent_decks,
@@ -1099,6 +1138,51 @@ def admin_notify(payload: AdminNotificationIn, request: Request, db: Session = D
     create_admin_audit(db, admin.id, "notify_all", detail=message)
     db.commit()
     return GenericMessageOut(status="ok", message=f"Notification sent to {len(targets)} users.")
+
+
+@app.post("/api/admin/email", response_model=GenericMessageOut)
+def admin_email(payload: AdminEmailIn, request: Request, db: Session = Depends(get_db)) -> GenericMessageOut:
+    enforce_rate_limit("admin_notify", request, extra_key=str(payload.admin_profile_id))
+    admin = require_admin(payload.admin_profile_id, db)
+    target = db.get(Profile, payload.target_profile_id)
+    if not target:
+      raise HTTPException(status_code=404, detail="Target profile not found.")
+    if not target.email:
+      raise HTTPException(status_code=400, detail="That user does not have an email address on file.")
+
+    subject = payload.subject.strip()
+    message = payload.message.strip()
+    if not subject:
+      raise HTTPException(status_code=400, detail="Email subject is required.")
+    if not message:
+      raise HTTPException(status_code=400, detail="Email message is required.")
+
+    html_body = f"""\
+<html>
+  <body style="margin:0;padding:0;background:#07111b;color:#ecf8ff;font-family:Arial,sans-serif;">
+    <div style="max-width:640px;margin:0 auto;padding:32px 20px;">
+      <div style="padding:24px;border-radius:24px;background:linear-gradient(180deg,#0c1724,#09111d);border:1px solid rgba(167,220,255,.18);">
+        <p style="margin:0 0 12px;color:#86dfff;font-size:12px;letter-spacing:.14em;text-transform:uppercase;">Paladin's Vault Admin</p>
+        <h1 style="margin:0 0 18px;font-size:28px;line-height:1.15;color:#f5fcff;">{subject}</h1>
+        <p style="margin:0 0 18px;color:#d7ecff;line-height:1.75;">Hello {target.username},</p>
+        <div style="margin:0 0 18px;color:#d7ecff;line-height:1.8;white-space:pre-line;">{message}</div>
+        <p style="margin:24px 0 0;color:#9fc4df;font-size:14px;line-height:1.7;">This message was sent from the Paladin's Vault admin dashboard.</p>
+      </div>
+    </div>
+  </body>
+</html>
+"""
+    email = EmailMessage(
+        subject=subject,
+        to_email=target.email,
+        html=html_body,
+        text=f"Hello {target.username},\n\n{message}\n\nThis message was sent from the Paladin's Vault admin dashboard.",
+    )
+    send_email_message(email)
+    db.add(Notification(profile_id=target.id, actor_profile_id=admin.id, type="admin_message", message=f"Admin email sent: {subject}", created_at=datetime.utcnow()))
+    create_admin_audit(db, admin.id, "email_user", target_profile_id=target.id, detail=f"{target.email} • {subject}")
+    db.commit()
+    return GenericMessageOut(status="ok", message=f"Email sent to {target.username} at {target.email}.")
 
 
 @app.post("/api/admin/verify", response_model=GenericMessageOut)
@@ -1271,6 +1355,14 @@ def cards_by_ids(ids: str, db: Session = Depends(get_db)) -> CardListResponse:
     cards = db.scalars(select(Card).where(Card.id.in_(parsed_ids))).all()
     ordered = sorted(cards, key=lambda card: parsed_ids.index(card.id))
     return CardListResponse(items=[card_to_out(card) for card in ordered], total=len(ordered))
+
+
+@app.get("/api/cards/{card_id}", response_model=CardOut)
+def card_detail(card_id: int, db: Session = Depends(get_db)) -> CardOut:
+    card = db.get(Card, card_id)
+    if not card:
+        raise HTTPException(status_code=404, detail="Card not found.")
+    return card_to_out(card)
 
 
 @app.post("/api/decks", response_model=DeckCreateOut)

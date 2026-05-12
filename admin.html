@@ -61,6 +61,14 @@
       </section>
 
       <section class="panel admin-panel" id="admin-panel" hidden>
+        <div class="admin-dashboard-intro summary-card">
+          <div>
+            <p class="section-label">Control Center</p>
+            <h2>Live moderation, diagnostics, and user inbox</h2>
+            <p class="hero-text">Monitor platform health, review new messages, and take moderation actions from one place.</p>
+          </div>
+        </div>
+
         <div class="admin-stat-grid" id="admin-stat-grid"></div>
 
         <div class="admin-two-column">
@@ -77,53 +85,112 @@
         </div>
 
         <div class="admin-two-column">
-          <section class="summary-card">
+          <section class="summary-card admin-snapshot-card">
             <p class="section-label">Database</p>
             <h2>Database snapshot</h2>
             <div id="admin-database-tables" class="chip-row"></div>
           </section>
-          <section class="summary-card">
-            <p class="section-label">Notifications</p>
-            <h2>Send admin notification</h2>
-            <div class="create-profile-grid">
-              <label class="field">
-                <span>Target User</span>
-                <select id="admin-notify-target">
-                  <option value="">All non-banned users</option>
-                </select>
-              </label>
-              <label class="field">
-                <span>Message</span>
-                <textarea id="admin-notify-message" rows="4" placeholder="Write the admin message to send."></textarea>
-              </label>
-              <button id="admin-notify-button" class="primary-button">Send Notification</button>
-            </div>
+          <section class="summary-card admin-email-card">
+            <p class="section-label">Email Diagnostics</p>
+            <h2>Verification mail status</h2>
+            <div id="admin-email-diagnostics" class="admin-email-diagnostics"></div>
           </section>
         </div>
 
-        <section class="summary-card">
-          <p class="section-label">Moderation</p>
-          <h2>Users</h2>
+        <section class="summary-card admin-notify-card">
+          <div class="admin-card-header">
+            <div>
+              <p class="section-label">Notifications</p>
+              <h2>Send admin notification</h2>
+            </div>
+            <p class="hero-text">Send an in-app notice to one player or to all active users.</p>
+          </div>
+          <div class="create-profile-grid">
+            <label class="field">
+              <span>Target User</span>
+              <select id="admin-notify-target">
+                <option value="">All non-banned users</option>
+              </select>
+            </label>
+            <label class="field">
+              <span>Message</span>
+              <textarea id="admin-notify-message" rows="4" placeholder="Write the admin message to send."></textarea>
+            </label>
+            <button id="admin-notify-button" class="primary-button">Send Notification</button>
+          </div>
+        </section>
+
+        <section class="summary-card admin-email-send-card">
+          <div class="admin-card-header">
+            <div>
+              <p class="section-label">Email Test</p>
+              <h2>Send email to user</h2>
+            </div>
+            <p class="hero-text">Send a real email through the live delivery system to one user and use it as a verification test.</p>
+          </div>
+          <div class="create-profile-grid">
+            <label class="field">
+              <span>Target User</span>
+              <select id="admin-email-target">
+                <option value="">Select a user</option>
+              </select>
+            </label>
+            <label class="field">
+              <span>Subject</span>
+              <input id="admin-email-subject" type="text" placeholder="Example: Test email from Paladin's Vault admin">
+            </label>
+            <label class="field">
+              <span>Message</span>
+              <textarea id="admin-email-message" rows="5" placeholder="Write the email body you want to send to the user."></textarea>
+            </label>
+            <button id="admin-email-button" class="primary-button">Send Test Email</button>
+          </div>
+        </section>
+
+        <section class="summary-card admin-users-card">
+          <div class="admin-card-header">
+            <div>
+              <p class="section-label">Moderation</p>
+              <h2>Users</h2>
+            </div>
+            <p class="hero-text">Verify, ban, or review account state from the live roster.</p>
+          </div>
           <div id="admin-user-list" class="admin-user-list"></div>
         </section>
 
-        <section class="summary-card">
-          <p class="section-label">Deck Feed</p>
-          <h2>Recent decks</h2>
-          <div id="admin-deck-list" class="profile-decks compact-grid"></div>
-        </section>
+        <div class="admin-two-column admin-feed-grid">
+          <section class="summary-card admin-decks-card">
+            <div class="admin-card-header">
+              <div>
+                <p class="section-label">Deck Feed</p>
+                <h2>Recent decks</h2>
+              </div>
+              <p class="hero-text">Newest published and private deck activity snapshot.</p>
+            </div>
+            <div id="admin-deck-list" class="profile-decks compact-grid"></div>
+          </section>
 
+          <section class="summary-card admin-inbox-card">
+            <div class="admin-card-header">
+              <div>
+                <p class="section-label">Inbox</p>
+                <h2>User messages</h2>
+              </div>
+              <p class="hero-text">Messages submitted through the contact form.</p>
+            </div>
+            <div id="admin-contact-inbox" class="admin-contact-inbox"></div>
+          </section>
+        </div>
 
-        <section class="summary-card">
-          <p class="section-label">Inbox</p>
-          <h2>User messages</h2>
-          <div id="admin-contact-inbox" class="admin-month-list"></div>
-        </section>
-
-        <section class="summary-card">
-          <p class="section-label">Audit</p>
-          <h2>Recent admin actions</h2>
-          <div id="admin-audit-log" class="admin-month-list"></div>
+        <section class="summary-card admin-audit-card">
+          <div class="admin-card-header">
+            <div>
+              <p class="section-label">Audit</p>
+              <h2>Recent admin actions</h2>
+            </div>
+            <p class="hero-text">Track moderation history and manual interventions.</p>
+          </div>
+          <div id="admin-audit-log" class="admin-audit-log"></div>
         </section>
       </section>
     </main>
