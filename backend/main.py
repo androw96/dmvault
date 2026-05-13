@@ -407,6 +407,7 @@ def send_via_resend_api(message: EmailMessage) -> None:
         headers={
             "Authorization": f"Bearer {RESEND_API_KEY}",
             "Content-Type": "application/json",
+            "User-Agent": "PaladinsVault/1.0",
         },
         method="POST",
     )
