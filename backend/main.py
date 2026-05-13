@@ -358,6 +358,38 @@ Open the deck:
     return message
 
 
+def build_admin_email_message(*, recipient_email: str, recipient_name: str, subject: str, body_message: str) -> EmailMessage:
+    message = EmailMessage()
+    message["Subject"] = subject
+    message["From"] = f"Paladin's Vault <{SMTP_FROM_EMAIL}>"
+    message["To"] = recipient_email
+    message.set_content(
+        f"""Hello {recipient_name},
+
+{body_message}
+
+This message was sent from the Paladin's Vault admin dashboard.
+"""
+    )
+    html_body = f"""\
+<html>
+  <body style="margin:0;padding:0;background:#07111b;color:#ecf8ff;font-family:Arial,sans-serif;">
+    <div style="max-width:640px;margin:0 auto;padding:32px 20px;">
+      <div style="padding:24px;border-radius:24px;background:linear-gradient(180deg,#0c1724,#09111d);border:1px solid rgba(167,220,255,.18);">
+        <p style="margin:0 0 12px;color:#86dfff;font-size:12px;letter-spacing:.14em;text-transform:uppercase;">Paladin's Vault Admin</p>
+        <h1 style="margin:0 0 18px;font-size:28px;line-height:1.15;color:#f5fcff;">{subject}</h1>
+        <p style="margin:0 0 18px;color:#d7ecff;line-height:1.75;">Hello {recipient_name},</p>
+        <div style="margin:0 0 18px;color:#d7ecff;line-height:1.8;white-space:pre-line;">{body_message}</div>
+        <p style="margin:24px 0 0;color:#9fc4df;font-size:14px;line-height:1.7;">This message was sent from the Paladin's Vault admin dashboard.</p>
+      </div>
+    </div>
+  </body>
+</html>
+"""
+    message.add_alternative(html_body, subtype="html")
+    return message
+
+
 def send_via_resend_api(message: EmailMessage) -> None:
     text_part = message.get_body(preferencelist=("plain",))
     html_part = message.get_body(preferencelist=("html",))
@@ -1161,26 +1193,11 @@ def admin_email(payload: AdminEmailIn, request: Request, db: Session = Depends(g
     recipient_email = target_email or normalize_email(target.email or "")
     recipient_name = target.username if target else "Paladin's Vault user"
 
-    html_body = f"""\
-<html>
-  <body style="margin:0;padding:0;background:#07111b;color:#ecf8ff;font-family:Arial,sans-serif;">
-    <div style="max-width:640px;margin:0 auto;padding:32px 20px;">
-      <div style="padding:24px;border-radius:24px;background:linear-gradient(180deg,#0c1724,#09111d);border:1px solid rgba(167,220,255,.18);">
-        <p style="margin:0 0 12px;color:#86dfff;font-size:12px;letter-spacing:.14em;text-transform:uppercase;">Paladin's Vault Admin</p>
-        <h1 style="margin:0 0 18px;font-size:28px;line-height:1.15;color:#f5fcff;">{subject}</h1>
-        <p style="margin:0 0 18px;color:#d7ecff;line-height:1.75;">Hello {recipient_name},</p>
-        <div style="margin:0 0 18px;color:#d7ecff;line-height:1.8;white-space:pre-line;">{message}</div>
-        <p style="margin:24px 0 0;color:#9fc4df;font-size:14px;line-height:1.7;">This message was sent from the Paladin's Vault admin dashboard.</p>
-      </div>
-    </div>
-  </body>
-</html>
-"""
-    email = EmailMessage(
+    email = build_admin_email_message(
+        recipient_email=recipient_email,
+        recipient_name=recipient_name,
         subject=subject,
-        to_email=recipient_email,
-        html=html_body,
-        text=f"Hello {recipient_name},\n\n{message}\n\nThis message was sent from the Paladin's Vault admin dashboard.",
+        body_message=message,
     )
     send_email_message(email)
     if target:

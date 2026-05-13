@@ -304,6 +304,7 @@ initialize().catch((error) => {
 async function initialize() {
   ensureDeckDeleteModal();
   ensureAccountDeleteModal();
+  ensureExportModal();
   ensureAuthModalEnhancements();
   ensureNotificationMenu();
   ensureMobileNavToggle();
@@ -510,7 +511,12 @@ function ensureMobileNavToggle() {
   });
   for (const link of navLinks.querySelectorAll("a, button, summary")) {
     link.addEventListener("click", () => {
-      if (window.innerWidth <= 820 && !link.closest(".nav-avatar-dropdown") && !link.closest(".nav-notification-dropdown")) {
+      if (
+        window.innerWidth <= 820
+        && !link.closest(".nav-avatar-dropdown")
+        && !link.closest(".nav-notification-dropdown")
+        && !link.closest(".nav-explore-dropdown")
+      ) {
         nav.classList.remove("is-mobile-open");
         sync();
       }
@@ -1209,12 +1215,15 @@ function renderAuthNavigation() {
   const loggedIn = Boolean(activeProfile());
   for (const link of elements.loginNavLinks) {
     link.hidden = loggedIn;
+    link.style.display = loggedIn ? "none" : "";
   }
   for (const link of elements.signupNavLinks) {
     link.hidden = loggedIn;
+    link.style.display = loggedIn ? "none" : "";
   }
   for (const menu of elements.profileMenus) {
     menu.hidden = !loggedIn;
+    menu.style.display = !loggedIn ? "none" : "";
   }
   for (const link of elements.myDecksLinks) {
     link.hidden = !loggedIn;
@@ -1243,6 +1252,82 @@ function renderAuthNavigation() {
     avatar.classList.add("profile-avatar-image");
   }
   ensureAdminMenuLinks();
+}
+
+function ensureExportModal() {
+  if (document.querySelector("#export-progress-modal")) {
+    elements.exportProgressModal = document.querySelector("#export-progress-modal");
+    elements.exportProgressClose = document.querySelector("#close-export-progress-modal");
+    elements.exportProgressCloseTargets = [...document.querySelectorAll("[data-close-export-progress-modal]")];
+    elements.exportProgressTitle = document.querySelector("#export-progress-title");
+    elements.exportProgressMessage = document.querySelector("#export-progress-message");
+    elements.exportProgressBar = document.querySelector("#export-progress-bar");
+    elements.exportProgressPercent = document.querySelector("#export-progress-percent");
+    return;
+  }
+  const wrapper = document.createElement("div");
+  wrapper.innerHTML = `
+    <div id="export-progress-modal" class="modal-shell" hidden>
+      <div class="modal-backdrop" data-close-export-progress-modal></div>
+      <section class="panel modal-panel auth-modal-panel export-progress-modal-panel">
+        <div class="panel-header">
+          <div>
+            <p class="section-label">Export</p>
+            <h2 id="export-progress-title">Preparing export</h2>
+          </div>
+          <button id="close-export-progress-modal" type="button" class="ghost-button">Close</button>
+        </div>
+        <p id="export-progress-message" class="hero-text">Please wait while Paladin's Vault prepares your file.</p>
+        <div class="export-progress-track">
+          <div id="export-progress-bar" class="export-progress-bar"></div>
+        </div>
+        <p id="export-progress-percent" class="export-progress-percent">0%</p>
+      </section>
+    </div>
+  `;
+  document.body.append(wrapper.firstElementChild);
+  elements.exportProgressModal = document.querySelector("#export-progress-modal");
+  elements.exportProgressClose = document.querySelector("#close-export-progress-modal");
+  elements.exportProgressCloseTargets = [...document.querySelectorAll("[data-close-export-progress-modal]")];
+  elements.exportProgressTitle = document.querySelector("#export-progress-title");
+  elements.exportProgressMessage = document.querySelector("#export-progress-message");
+  elements.exportProgressBar = document.querySelector("#export-progress-bar");
+  elements.exportProgressPercent = document.querySelector("#export-progress-percent");
+  elements.exportProgressClose?.addEventListener("click", closeExportModal);
+  for (const target of elements.exportProgressCloseTargets) {
+    target.addEventListener("click", closeExportModal);
+  }
+}
+
+function openExportModal(title, message, percent = 0) {
+  ensureExportModal();
+  if (elements.exportProgressTitle) elements.exportProgressTitle.textContent = title;
+  if (elements.exportProgressMessage) elements.exportProgressMessage.textContent = message;
+  if (elements.exportProgressBar) elements.exportProgressBar.style.width = `${Math.max(0, Math.min(100, percent))}%`;
+  if (elements.exportProgressPercent) elements.exportProgressPercent.textContent = `${Math.round(percent)}%`;
+  if (elements.exportProgressModal) elements.exportProgressModal.hidden = false;
+}
+
+function updateExportModal(message, percent) {
+  if (elements.exportProgressMessage) elements.exportProgressMessage.textContent = message;
+  if (elements.exportProgressBar) elements.exportProgressBar.style.width = `${Math.max(0, Math.min(100, percent))}%`;
+  if (elements.exportProgressPercent) elements.exportProgressPercent.textContent = `${Math.round(percent)}%`;
+}
+
+function completeExportModal(message) {
+  if (elements.exportProgressTitle) elements.exportProgressTitle.textContent = "Export complete";
+  updateExportModal(message, 100);
+}
+
+function failExportModal(message) {
+  if (elements.exportProgressTitle) elements.exportProgressTitle.textContent = "Export failed";
+  updateExportModal(message, 100);
+}
+
+function closeExportModal() {
+  if (elements.exportProgressModal) {
+    elements.exportProgressModal.hidden = true;
+  }
 }
 
 function renderNotifications() {
@@ -2668,14 +2753,14 @@ function resetExportSelect() {
   }
 }
 
-function handleExportSelection(event) {
+async function handleExportSelection(event) {
   const value = event.target.value;
   if (value === "png") {
-    exportViewPng();
+    await exportViewPng();
   } else if (value === "pdf") {
-    exportPdfPrint();
+    await exportPdfPrint();
   } else if (value === "text") {
-    exportDeckText();
+    await exportDeckText();
   }
 }
 
@@ -2791,9 +2876,12 @@ async function loadSelectedBuilderDeck() {
 async function exportViewPng() {
   const cards = expandDeckCards();
   if (cards.length === 0) {
+    failExportModal("No cards are available for PNG export.");
     setStatus("No cards available for PNG export.", "error");
+    resetExportSelect();
     return;
   }
+  openExportModal("Preparing PNG export", `Rendering ${cards.length} cards into a deck view image...`, 4);
 
   const cols = cards.length <= 9 ? 3 : cards.length <= 20 ? 5 : 10;
   const rows = Math.ceil(cards.length / cols);
@@ -2813,7 +2901,15 @@ async function exportViewPng() {
   ctx.textBaseline = "middle";
   ctx.font = "14px 'Space Grotesk', sans-serif";
 
-  const imagePromises = cards.map((card) => loadCardImage(card));
+  let loadedCount = 0;
+  const imagePromises = cards.map((card) => loadCardImage(card).then((result) => {
+    loadedCount += 1;
+    updateExportModal(
+      `Loading card images for ${deckSnapshotTitle()}...`,
+      8 + (loadedCount / cards.length) * 72
+    );
+    return result;
+  }));
   const loadedImages = await Promise.all(imagePromises);
 
   loadedImages.forEach(({ card, image }, index) => {
@@ -2842,6 +2938,7 @@ async function exportViewPng() {
   anchor.download = `${slugifyFilename(deckSnapshotTitle())}-view.png`;
   anchor.click();
   resetExportSelect();
+  completeExportModal(`Successfully exported to ${anchor.download}`);
   setStatus(`Export completed: ${deckSnapshotTitle()} view PNG`, "success");
 }
 
@@ -3490,12 +3587,15 @@ function normalizeName(value) {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 }
 
-function exportDeckText() {
+async function exportDeckText() {
   const entries = expandedDeckEntries();
   if (entries.length === 0) {
+    failExportModal("No cards are available for text export.");
     setStatus("No cards available for text export.", "error");
+    resetExportSelect();
     return;
   }
+  openExportModal("Preparing text export", "Building your decklist text file...", 35);
   const body = entries.map((entry) => `${entry.count} ${entry.card.name}`).join("\n");
   const blob = new Blob([`${deckSnapshotTitle()}\n\n${body}\n`], { type: "text/plain;charset=utf-8" });
   const url = URL.createObjectURL(blob);
@@ -3505,15 +3605,22 @@ function exportDeckText() {
   anchor.click();
   URL.revokeObjectURL(url);
   resetExportSelect();
+  completeExportModal(`Successfully exported to ${anchor.download}`);
   setStatus(`Export completed: ${deckSnapshotTitle()} text`, "success");
 }
 
 async function exportPdfPrint() {
   if (!state.loadedShareId) {
+    failExportModal("This deck must be synced before PDF export.");
     setStatus("This deck needs to sync once before exporting a PDF print file.", "error");
     resetExportSelect();
     return;
   }
+  openExportModal("Preparing PDF export", "Starting secure PDF export for your deck...", 12);
+  await new Promise((resolve) => window.setTimeout(resolve, 180));
+  updateExportModal("Generating printable deck sheets...", 46);
+  await new Promise((resolve) => window.setTimeout(resolve, 220));
+  updateExportModal("Finalizing PDF download...", 78);
   resetExportSelect();
   const anchor = document.createElement("a");
   anchor.href = withViewer(`${API_BASE}/decks/${state.loadedShareId}/pdf`);
@@ -3521,6 +3628,7 @@ async function exportPdfPrint() {
   document.body.append(anchor);
   anchor.click();
   anchor.remove();
+  completeExportModal(`Successfully exported to ${anchor.download}`);
   setStatus(`Export completed: ${deckSnapshotTitle()} PDF`, "success");
 }
 
