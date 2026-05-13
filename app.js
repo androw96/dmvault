@@ -2460,11 +2460,18 @@ function handleNavDropdownToggle(dropdown) {
       other.open = false;
     }
   }
+  if (window.innerWidth <= 820) {
+    restoreDropdownMenu(dropdown, menu);
+    return;
+  }
   promoteDropdownMenu(dropdown, menu);
   positionDropdownMenu(summary, menu, dropdown.classList.contains("nav-avatar-dropdown"));
 }
 
 function repositionOpenNavDropdowns() {
+  if (window.innerWidth <= 820) {
+    return;
+  }
   for (const dropdown of elements.navDropdowns) {
     if (!dropdown.open) {
       continue;

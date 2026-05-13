@@ -12,7 +12,7 @@ import ssl
 import time
 from email.message import EmailMessage
 from urllib.error import HTTPError, URLError
-from urllib.request import Request, urlopen
+from urllib.request import Request as UrlRequest, urlopen
 
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
@@ -401,7 +401,7 @@ def send_via_resend_api(message: EmailMessage) -> None:
         "html": html_part.get_content() if html_part else None,
     }
     body = json.dumps(payload).encode("utf-8")
-    request = Request(
+    request = UrlRequest(
         "https://api.resend.com/emails",
         data=body,
         headers={
