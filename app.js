@@ -718,6 +718,17 @@ function bindEvents() {
   for (const button of elements.openAuthModalButtons) {
     button.addEventListener("click", openAuthModal);
   }
+  for (const link of elements.routeLinks) {
+    if (link.dataset.routeLink !== "builder") continue;
+    link.addEventListener("click", (event) => {
+      if (state.activeProfileId) {
+        return;
+      }
+      event.preventDefault();
+      setStatus("Sign up or log in first to start a new deck.", "error");
+      openAuthModal();
+    });
+  }
   elements.openExploreFiltersButton?.addEventListener("click", openExploreFiltersModal);
   elements.applyExploreFiltersButton?.addEventListener("click", applyExploreFilters);
   elements.resetExploreFiltersButton?.addEventListener("click", resetExploreFilters);
@@ -1028,6 +1039,9 @@ async function maybeLoadViewedProfile() {
   }
   try {
     state.viewedProfile = await fetchJson(withViewer(`${API_BASE}/profiles/by-username/${encodeURIComponent(username)}`));
+    if (state.viewedProfile?.is_admin && state.viewedProfile.id !== state.activeProfileId) {
+      state.viewedProfile = null;
+    }
   } catch {
     state.viewedProfile = null;
   }
@@ -1183,8 +1197,10 @@ function renderWelcome() {
   const profile = activeProfile();
   if (profile) {
     elements.welcomeMessage.textContent = `Welcome ${profile.display_name}!`;
+    elements.welcomePrimaryLink.href = "/builder";
   } else {
     elements.welcomeMessage.textContent = "Build a new deck or browse what the community has already saved.";
+    elements.welcomePrimaryLink.href = "#";
   }
 }
 
@@ -1238,6 +1254,13 @@ function renderAuthNavigation() {
   }
   for (const link of elements.logoutNavLinks) {
     link.hidden = !loggedIn;
+  }
+  for (const link of elements.routeLinks) {
+    if (link.dataset.routeLink !== "builder") continue;
+    link.href = loggedIn ? "/builder" : "#";
+  }
+  if (elements.welcomePrimaryLink) {
+    elements.welcomePrimaryLink.href = loggedIn ? "/builder" : "#";
   }
   if (elements.notificationMenu) {
     elements.notificationMenu.hidden = !loggedIn;
@@ -1320,6 +1343,56 @@ function updateExportModal(message, percent) {
   if (elements.exportProgressMessage) elements.exportProgressMessage.textContent = message;
   if (elements.exportProgressBar) elements.exportProgressBar.style.width = `${Math.max(0, Math.min(100, percent))}%`;
   if (elements.exportProgressPercent) elements.exportProgressPercent.textContent = `${Math.round(percent)}%`;
+}
+
+async function fetchBlobWithProgress(url, options = {}) {
+  const {
+    startPercent = 0,
+    endPercent = 95,
+    progressMessage = "Downloading export..."
+  } = options;
+  const response = await fetch(url, { credentials: "same-origin" });
+  if (!response.ok) {
+    let detail = "";
+    try {
+      detail = await response.text();
+    } catch {
+      detail = "";
+    }
+    throw new Error(detail || `Export request failed: ${response.status}`);
+  }
+
+  if (!response.body) {
+    updateExportModal(progressMessage, endPercent);
+    return await response.blob();
+  }
+
+  const total = Number(response.headers.get("Content-Length") || 0);
+  const reader = response.body.getReader();
+  const chunks = [];
+  let received = 0;
+  let tick = 0;
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) {
+      break;
+    }
+    if (value) {
+      chunks.push(value);
+      received += value.byteLength;
+    }
+    tick += 1;
+    const percent = total > 0
+      ? startPercent + (received / total) * (endPercent - startPercent)
+      : Math.min(endPercent, startPercent + tick * 6);
+    updateExportModal(progressMessage, percent);
+  }
+
+  updateExportModal(progressMessage, endPercent);
+  return new Blob(chunks, {
+    type: response.headers.get("Content-Type") || "application/octet-stream"
+  });
 }
 
 function completeExportModal(message) {
@@ -1890,6 +1963,7 @@ function renderExploreUsers() {
 
   const ownProfile = activeProfile();
   const others = state.profiles
+    .filter((profile) => !profile.is_admin)
     .filter((profile) => !ownProfile || profile.id !== ownProfile.id)
     .filter((profile) => {
       if (!state.exploreSearch) return true;
@@ -3636,20 +3710,34 @@ async function exportPdfPrint() {
     resetExportSelect();
     return;
   }
-  openExportModal("Preparing PDF export", "Starting secure PDF export for your deck...", 12);
-  await new Promise((resolve) => window.setTimeout(resolve, 180));
-  updateExportModal("Generating printable deck sheets...", 46);
-  await new Promise((resolve) => window.setTimeout(resolve, 220));
-  updateExportModal("Finalizing PDF download...", 78);
-  resetExportSelect();
-  const anchor = document.createElement("a");
-  anchor.href = withViewer(`${API_BASE}/decks/${state.loadedShareId}/pdf`);
-  anchor.download = `${slugifyFilename(deckSnapshotTitle())}.pdf`;
-  document.body.append(anchor);
-  anchor.click();
-  anchor.remove();
-  completeExportModal(`Successfully exported to ${anchor.download}`);
-  setStatus(`Export completed: ${deckSnapshotTitle()} PDF`, "success");
+  const filename = `${slugifyFilename(deckSnapshotTitle())}.pdf`;
+  openExportModal("Preparing PDF export", `Generating printable PDF for ${deckSnapshotTitle()}...`, 10);
+  try {
+    updateExportModal("Generating printable deck sheets on the server...", 28);
+    const blob = await fetchBlobWithProgress(
+      withViewer(`${API_BASE}/decks/${state.loadedShareId}/pdf`),
+      {
+        startPercent: 34,
+        endPercent: 94,
+        progressMessage: `Downloading ${filename}...`
+      }
+    );
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = filename;
+    document.body.append(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(url);
+    resetExportSelect();
+    completeExportModal(`Successfully exported to ${filename}`);
+    setStatus(`Export completed: ${deckSnapshotTitle()} PDF`, "success");
+  } catch (error) {
+    failExportModal(error.message || "PDF export failed.");
+    setStatus(error.message || "PDF export failed.", "error");
+    resetExportSelect();
+  }
 }
 
 function importDeckJson(event) {

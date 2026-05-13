@@ -1644,7 +1644,8 @@ def deck_pdf(public_id: str, db: Session = Depends(get_db)) -> Response:
     db.commit()
 
     pdf_bytes = build_deck_pdf(deck)
-    headers = {"Content-Disposition": f'attachment; filename="{deck.public_id}.pdf"'}
+    filename = f"{slugify(deck.title or 'paladins-vault-deck')}.pdf"
+    headers = {"Content-Disposition": f'attachment; filename="{filename}"'}
     return Response(content=pdf_bytes, media_type="application/pdf", headers=headers)
 
 
