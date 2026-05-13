@@ -838,6 +838,14 @@ function bindEvents() {
   elements.adminNotifyButton?.addEventListener("click", sendAdminNotification);
   elements.adminEmailButton?.addEventListener("click", sendAdminEmail);
   elements.contactSubmitButton?.addEventListener("click", submitContactMessage);
+  elements.welcomePrimaryLink?.addEventListener("click", (event) => {
+    if (state.activeProfileId) {
+      return;
+    }
+    event.preventDefault();
+    setStatus("Sign up or log in first to start a new deck.", "error");
+    openAuthModal();
+  });
 }
 
 function setActiveNav() {
@@ -2811,6 +2819,11 @@ function resetDeckExportLinks() {
 }
 
 function startNewDeck(options = {}) {
+  if (!state.activeProfileId) {
+    setStatus("Sign up or log in first to start a new deck.", "error");
+    openAuthModal();
+    return;
+  }
   if (isBuilderLandingPage) {
     window.location.href = "/builder/editor?new=1";
     return;
