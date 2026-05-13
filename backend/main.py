@@ -1199,7 +1199,11 @@ def admin_email(payload: AdminEmailIn, request: Request, db: Session = Depends(g
         subject=subject,
         body_message=message,
     )
-    send_email_message(email)
+    try:
+        send_email_message(email)
+    except Exception as error:
+        logger.exception("Admin email sending failed: %s", error)
+        raise HTTPException(status_code=502, detail=str(error) or "Email sending failed.") from error
     if target:
         db.add(Notification(profile_id=target.id, actor_profile_id=admin.id, type="admin_message", message=f"Admin email sent: {subject}", created_at=datetime.utcnow()))
     create_admin_audit(db, admin.id, "email_user", target_profile_id=target.id if target else None, detail=f"{recipient_email} • {subject}")
