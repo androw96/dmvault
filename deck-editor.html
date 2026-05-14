@@ -44,13 +44,12 @@
     <main class="page-stack">
       <section class="panel deck-workspace" data-builder-editor>
         <div class="workspace-top">
-          <div id="deck-workspace-header">
-            <p class="section-label">Active Deck</p>
-            <h2 id="deck-workspace-title">Your working list</h2>
+          <div id="deck-workspace-header" class="deck-workspace-header">
+            <h2 id="deck-workspace-title" class="deck-workspace-title" tabindex="0" role="button" aria-label="Rename deck">Paladin's Vault Deck</h2>
+            <input id="deck-title-input" type="hidden" value="Paladin's Vault Deck">
             <label id="deck-background-field" class="field workspace-background-field">
-              <span>Change Background</span>
               <select id="deck-cover-select">
-                <option value="">Auto from deck</option>
+                <option value="">Change Background</option>
               </select>
             </label>
             <div id="deck-owner-panel" class="deck-owner-panel" hidden>
@@ -65,7 +64,7 @@
               </div>
             </div>
           </div>
-          <div class="hero-actions">
+          <div class="workspace-control-stack">
             <label class="field export-select-field">
               <span>Export</span>
               <select id="export-select">
@@ -75,36 +74,56 @@
                 <option value="text">Text</option>
               </select>
             </label>
+            <details class="view-panel view-panel-dropdown">
+              <summary class="ghost-button view-panel-toggle">View</summary>
+              <div class="view-panel-grid">
+                <label class="field builder-visibility-field">
+                  <span>Visibility</span>
+                  <select id="deck-visibility-select">
+                    <option value="public">Public</option>
+                    <option value="private">Private</option>
+                  </select>
+                </label>
+                <label class="field builder-sort-field">
+                  <span>Sort Deck By</span>
+                  <select id="builder-sort">
+                    <option value="mana">Mana Cost</option>
+                    <option value="civilization">Civilization</option>
+                  </select>
+                </label>
+                <label class="field builder-view-field">
+                  <span>View</span>
+                  <select id="builder-view-select">
+                    <option value="image">Images</option>
+                    <option value="text">Text</option>
+                  </select>
+                </label>
+                <button id="open-playtest-button" type="button" class="small-button primary-button">Playtest</button>
+                <button id="toggle-history-button" type="button" class="small-button ghost-button">History</button>
+                <button id="clear-deck-button" class="small-button danger-button">Clear Deck</button>
+              </div>
+            </details>
           </div>
         </div>
 
-        <div class="deck-title-row">
-          <label class="field deck-title-field">
-            <span>Deck Name</span>
-            <input id="deck-title-input" type="text" value="Paladin's Vault Deck" placeholder="Example: Bolmeteus Control">
+        <div class="deck-builder-toolbar">
+          <label class="field deck-search-field">
+            <span>Search Cards</span>
+            <input id="search-input" type="search" placeholder="Start typing a card name like Bolmeteus, Meloppe, Aqua Hulcus">
           </label>
-          <label class="field builder-sort-field">
-            <span>Sort Deck By</span>
-            <select id="builder-sort">
-              <option value="mana">Mana Cost</option>
-              <option value="civilization">Civilization</option>
-            </select>
+          <label class="field builder-filter-field">
+            <span>Civilization</span>
+            <select id="civilization-filter"><option value="all">All</option></select>
           </label>
-          <label class="field builder-visibility-field">
-            <span>Visibility</span>
-            <select id="deck-visibility-select">
-              <option value="public">Public</option>
-              <option value="private">Private</option>
-            </select>
+          <label class="field builder-filter-field">
+            <span>Type</span>
+            <select id="type-filter"><option value="all">All</option></select>
           </label>
-          <label class="field builder-view-field">
-            <span>View</span>
-            <select id="builder-view-select">
-              <option value="image">Images</option>
-              <option value="text">Text</option>
-            </select>
+          <label class="field builder-cost-field">
+            <span>Mana Up To <strong id="cost-filter-value">14</strong></span>
+            <input id="cost-filter" type="range" min="1" max="14" value="14">
           </label>
-          <button id="clear-deck-button" class="small-button danger-button">Clear Deck</button>
+          <button id="reset-filters-button" class="small-button">Reset Filters</button>
         </div>
 
         <p id="share-status" class="hero-text" data-status></p>
@@ -117,21 +136,6 @@
       </section>
 
       <section class="panel quick-cards-panel" data-builder-editor>
-        <div class="panel-header">
-          <div>
-            <p class="section-label">Quick Add</p>
-            <h2>Search and add cards</h2>
-          </div>
-          <a class="ghost-button" href="/cards">Open Full Card Browser</a>
-        </div>
-
-        <div class="quick-search-row">
-          <label class="field">
-            <span>Keyword</span>
-            <input id="search-input" type="search" placeholder="Start typing a card name like Bolmeteus, Meloppe, Aqua Hulcus">
-          </label>
-        </div>
-
         <div id="catalog-grid" class="catalog-grid"></div>
       </section>
 
@@ -161,7 +165,7 @@
         </div>
       </section>
 
-      <section class="panel deck-history-panel" data-builder-editor>
+      <section id="deck-history-panel" class="panel deck-history-panel" data-builder-editor hidden>
         <div class="panel-header">
           <div>
             <p class="section-label">Deck History</p>

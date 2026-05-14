@@ -2,13 +2,28 @@ from __future__ import annotations
 
 import json
 
-from sqlalchemy import inspect, select
+from sqlalchemy import delete, inspect, select
 
 from .database import RAW_DIR, SessionLocal, engine
-from .models import Base, Card
+from .models import Base, Card, DeckItem
 from .utils import card_key, slugify
 
 RAW_FILE = RAW_DIR / "DuelMastersCards.json"
+LEGAL_TCG_SET_NAMES = {
+    "DM-01 Base Set",
+    "DM-02 Evo-Crushinators of Doom",
+    "DM-03 Rampage of the Super Warriors",
+    "DM-04 Shadowclash of Blinding Night",
+    "DM-05 Survivors of the Megapocalypse",
+    "DM-06 Stomp-A-Trons of Invincible Wrath",
+    "DM-07 Thundercharge of Ultra Destruction",
+    "DM-08 Epic Dragons of Hyperchaos",
+    "DM-09 Fatal Brood of Infinite Ruin",
+    "DM-10 Shockwaves of the Shattered Rainbow",
+    "DM-11 Blastosplosion of Gigantic Rage",
+    "DM-12 Thrash of the Hybrid Megacreatures",
+    "Promotional",
+}
 
 
 def initialize_database() -> None:
@@ -176,6 +191,7 @@ def seed_cards_if_needed() -> int:
         existing = session.scalar(select(Card.id).limit(1))
         if not existing:
             seed_cards(session)
+        enforce_legal_card_pool(session)
         return session.query(Card).count()
 
 
@@ -188,6 +204,8 @@ def seed_cards(session) -> int:
         civilizations = entry.get("civilizations") or ([entry["civilization"]] if entry.get("civilization") else [])
         race_bits = entry.get("subtypes") or entry.get("races") or ([entry["race"]] if entry.get("race") else [])
         printing = (entry.get("printings") or [{}])[0]
+        if printing.get("set") not in LEGAL_TCG_SET_NAMES:
+            continue
         current = Card(
             card_key=card_key(entry["name"], printing.get("set"), printing.get("id")),
             slug=slugify(entry["name"]),
@@ -209,6 +227,18 @@ def seed_cards(session) -> int:
 
     session.commit()
     return inserted
+
+
+def enforce_legal_card_pool(session) -> int:
+    illegal_ids = session.scalars(
+        select(Card.id).where(Card.set_name.is_not(None), Card.set_name.not_in(LEGAL_TCG_SET_NAMES))
+    ).all()
+    if not illegal_ids:
+        return 0
+    session.execute(delete(DeckItem).where(DeckItem.card_id.in_(illegal_ids)))
+    session.execute(delete(Card).where(Card.id.in_(illegal_ids)))
+    session.commit()
+    return len(illegal_ids)
 
 
 if __name__ == "__main__":

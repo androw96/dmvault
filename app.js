@@ -1,5 +1,6 @@
 const API_BASE = "/api";
 const LOCAL_STORAGE_KEY = "paladins-vault-local-deck";
+const PLAYTEST_STORAGE_KEY = "paladins-vault-playtest-session";
 const PROFILE_STORAGE_KEY = "paladins-vault-active-profile";
 const BUILDER_PREFS_KEY = "paladins-vault-builder-prefs";
 const COOKIE_CONSENT_KEY = "paladins-vault-cookie-consent";
@@ -47,6 +48,7 @@ const page = document.body.dataset.page ?? "welcome";
 const isBuilderLandingPage = page === "builder";
 const isDeckEditorPage = page === "deck-editor";
 const isCardDetailPage = page === "card-detail";
+const isPlaytestPage = page === "playtest";
 const isBuilderExperiencePage = isBuilderLandingPage || isDeckEditorPage;
 const hasPreloadedBuilderDeck = window.location.pathname.match(/^\/share\/[a-z0-9-]+$/i)
   || (isDeckEditorPage && new URLSearchParams(window.location.search).has("deck"));
@@ -86,6 +88,7 @@ const state = {
   deckCoverImageUrl: null,
   builderReady: isBuilderLandingPage ? false : (isDeckEditorPage ? true : Boolean(hasPreloadedBuilderDeck)),
   builderModifyOpen: false,
+  historyOpen: false,
   avatarPickerTarget: null,
   deckOwnerId: null,
   loadedDeckOwner: null,
@@ -102,7 +105,19 @@ const state = {
   deck: {},
   cardsLoaded: false,
   cardSearchDebounce: null,
-  cardsRequestId: 0
+  cardsRequestId: 0,
+  playtest: {
+    title: "Playtest Sandbox",
+    sourceCards: [],
+    drawPile: [],
+    hand: [],
+    shields: [],
+    mana: [],
+    battle: [],
+    graveyard: [],
+    turn: 1,
+    ready: false
+  }
 };
 
 const elements = {
@@ -120,10 +135,13 @@ const elements = {
   loadExistingDeckButton: document.querySelector("#load-existing-deck-button"),
   cancelModifyDeckButton: document.querySelector("#cancel-modify-deck-button"),
   exportSelect: document.querySelector("#export-select"),
+  openPlaytestButton: document.querySelector("#open-playtest-button"),
   builderViewSelect: document.querySelector("#builder-view-select"),
   deckCoverSelect: document.querySelector("#deck-cover-select"),
   deckWorkspaceTitle: document.querySelector("#deck-workspace-title"),
   deckBackgroundField: document.querySelector("#deck-background-field"),
+  toggleHistoryButton: document.querySelector("#toggle-history-button"),
+  deckHistoryPanel: document.querySelector("#deck-history-panel"),
   deckOwnerPanel: document.querySelector("#deck-owner-panel"),
   deckOwnerAvatar: document.querySelector("#deck-owner-avatar"),
   deckOwnerName: document.querySelector("#deck-owner-name"),
@@ -280,6 +298,37 @@ const elements = {
   adminDeckList: document.querySelector("#admin-deck-list"),
   adminAuditLog: document.querySelector("#admin-audit-log"),
   adminContactInbox: document.querySelector("#admin-contact-inbox"),
+  playtestTitle: document.querySelector("#playtest-title"),
+  playtestSubtitle: document.querySelector("#playtest-subtitle"),
+  playtestSetupButton: document.querySelector("#playtest-setup-button"),
+  playtestDrawButton: document.querySelector("#playtest-draw-button"),
+  playtestMulliganButton: document.querySelector("#playtest-mulligan-button"),
+  playtestShuffleButton: document.querySelector("#playtest-shuffle-button"),
+  playtestResetButton: document.querySelector("#playtest-reset-button"),
+  playtestTurnDec: document.querySelector("#playtest-turn-dec"),
+  playtestTurnInc: document.querySelector("#playtest-turn-inc"),
+  playtestTurnValue: document.querySelector("#playtest-turn-value"),
+  playtestDrawCount: document.querySelector("#playtest-draw-count"),
+  playtestShieldCount: document.querySelector("#playtest-shield-count"),
+  playtestHandCount: document.querySelector("#playtest-hand-count"),
+  playtestBattleCount: document.querySelector("#playtest-battle-count"),
+  playtestManaCount: document.querySelector("#playtest-mana-count"),
+  playtestGraveCount: document.querySelector("#playtest-grave-count"),
+  playtestEmpty: document.querySelector("#playtest-empty"),
+  playtestBoard: document.querySelector("#playtest-board"),
+  playtestDrawPileZone: document.querySelector("#playtest-draw-pile-zone"),
+  playtestShieldsZone: document.querySelector("#playtest-shields-zone"),
+  playtestHandZone: document.querySelector("#playtest-hand-zone"),
+  playtestBattleZone: document.querySelector("#playtest-battle-zone"),
+  playtestManaZone: document.querySelector("#playtest-mana-zone"),
+  playtestGraveyardZone: document.querySelector("#playtest-graveyard-zone"),
+  adminMonthModal: null,
+  adminMonthModalTitle: null,
+  adminMonthModalLabel: null,
+  adminMonthProfilesList: null,
+  adminMonthDecksList: null,
+  closeAdminMonthModal: null,
+  closeAdminMonthModalTargets: [],
   contactUsername: document.querySelector("#contact-username"),
   contactEmail: document.querySelector("#contact-email"),
   contactSubject: document.querySelector("#contact-subject"),
@@ -305,6 +354,7 @@ async function initialize() {
   ensureDeckDeleteModal();
   ensureAccountDeleteModal();
   ensureExportModal();
+  ensureAdminMonthModal();
   ensureAuthModalEnhancements();
   ensureNotificationMenu();
   ensureMobileNavToggle();
@@ -349,6 +399,9 @@ async function initialize() {
   if (isCardDetailPage) {
     await loadCardDetailPage();
   }
+  if (isPlaytestPage) {
+    await loadPlaytestSandbox();
+  }
   if (page === "admin" && state.activeProfileId) {
     await loadAdminOverview();
   }
@@ -370,6 +423,7 @@ async function initialize() {
   renderBuilder();
   renderCards();
   renderPrintPages();
+  renderPlaytestSandbox();
   renderHeaderStats();
   renderAdminPage();
   renderContactPage();
@@ -393,6 +447,434 @@ function openCardDetail(card) {
     return;
   }
   window.location.assign(`/cards/${card.id}`);
+}
+
+function playtestPagePath() {
+  return window.location.protocol === "file:" ? "./playtest.html" : "/playtest";
+}
+
+function resolveAssetUrl(path) {
+  if (!path) {
+    return DEFAULT_LOGO_URL;
+  }
+  if (/^(https?:)?\/\//i.test(path) || path.startsWith("data:")) {
+    return path;
+  }
+  if (window.location.protocol === "file:" && path.startsWith("/")) {
+    return `.${path}`;
+  }
+  return path;
+}
+
+function createPlaytestInstance(card, index) {
+  return {
+    uid: `${card.id}-${index}-${Math.random().toString(36).slice(2, 8)}`,
+    card,
+    tapped: false,
+    faceDown: false
+  };
+}
+
+function shuffleArray(items) {
+  const next = [...items];
+  for (let index = next.length - 1; index > 0; index -= 1) {
+    const swapIndex = Math.floor(Math.random() * (index + 1));
+    [next[index], next[swapIndex]] = [next[swapIndex], next[index]];
+  }
+  return next;
+}
+
+function playtestZones() {
+  return ["drawPile", "hand", "shields", "mana", "battle", "graveyard"];
+}
+
+function emptyPlaytestState(title = "Playtest Sandbox", sourceCards = []) {
+  return {
+    title,
+    sourceCards,
+    drawPile: [],
+    hand: [],
+    shields: [],
+    mana: [],
+    battle: [],
+    graveyard: [],
+    turn: 1,
+    ready: false
+  };
+}
+
+function persistPlaytestState() {
+  try {
+    window.sessionStorage.setItem(PLAYTEST_STORAGE_KEY, JSON.stringify(state.playtest));
+  } catch {}
+}
+
+function applyPlaytestState(nextState) {
+  state.playtest = {
+    ...emptyPlaytestState(nextState?.title || "Playtest Sandbox", nextState?.sourceCards || []),
+    ...nextState
+  };
+  persistPlaytestState();
+}
+
+function buildPlaytestSourceCards() {
+  return expandDeckCards().filter(Boolean).map((card) => ({ ...card }));
+}
+
+async function ensureDeckCardsHydratedForPlaytest() {
+  const missingIds = Object.keys(state.deck).filter((cardId) => state.deck[cardId] > 0 && !state.cardIndex[cardId]);
+  if (!missingIds.length || window.location.protocol === "file:") {
+    return;
+  }
+  const payload = await fetchJson(`${API_BASE}/cards/by-ids?ids=${missingIds.join(",")}`);
+  for (const card of payload.items || []) {
+    state.cardIndex[String(card.id)] = card;
+  }
+}
+
+function setupPlaytestGame(options = {}) {
+  const keepTurn = options.keepTurn === true;
+  const deckStack = shuffleArray(state.playtest.sourceCards.map((card, index) => createPlaytestInstance(card, index)));
+  const shields = deckStack.splice(0, 5).map((entry) => ({ ...entry, faceDown: true }));
+  const hand = deckStack.splice(0, 5).map((entry) => ({ ...entry, faceDown: false }));
+  applyPlaytestState({
+    ...state.playtest,
+    drawPile: deckStack,
+    hand,
+    shields,
+    mana: [],
+    battle: [],
+    graveyard: [],
+    turn: keepTurn ? state.playtest.turn : 1,
+    ready: true
+  });
+}
+
+function movePlaytestCard(sourceZone, uid, targetZone, options = {}) {
+  const source = state.playtest[sourceZone];
+  const target = state.playtest[targetZone];
+  if (!Array.isArray(source) || !Array.isArray(target)) {
+    return;
+  }
+  const index = source.findIndex((entry) => entry.uid === uid);
+  if (index === -1) {
+    return;
+  }
+  const [card] = source.splice(index, 1);
+  const moved = {
+    ...card,
+    tapped: options.resetTapped ? false : Boolean(options.tapped ?? card.tapped),
+    faceDown: typeof options.faceDown === "boolean" ? options.faceDown : card.faceDown
+  };
+  if (options.toTop) {
+    target.unshift(moved);
+  } else {
+    target.push(moved);
+  }
+  persistPlaytestState();
+  renderPlaytestSandbox();
+}
+
+function togglePlaytestTapped(zoneName, uid) {
+  const zone = state.playtest[zoneName];
+  if (!Array.isArray(zone)) {
+    return;
+  }
+  const card = zone.find((entry) => entry.uid === uid);
+  if (!card) {
+    return;
+  }
+  card.tapped = !card.tapped;
+  persistPlaytestState();
+  renderPlaytestSandbox();
+}
+
+function toggleShieldReveal(uid) {
+  const shield = state.playtest.shields.find((entry) => entry.uid === uid);
+  if (!shield) {
+    return;
+  }
+  shield.faceDown = !shield.faceDown;
+  persistPlaytestState();
+  renderPlaytestSandbox();
+}
+
+function drawPlaytestCards(count = 1) {
+  const amount = Math.max(1, count);
+  for (let index = 0; index < amount; index += 1) {
+    if (!state.playtest.drawPile.length) {
+      break;
+    }
+    const nextCard = state.playtest.drawPile.shift();
+    state.playtest.hand.push({ ...nextCard, faceDown: false, tapped: false });
+  }
+  state.playtest.ready = true;
+  persistPlaytestState();
+  renderPlaytestSandbox();
+}
+
+function mulliganPlaytestHand() {
+  if (!state.playtest.hand.length) {
+    return;
+  }
+  const nextDeck = shuffleArray([
+    ...state.playtest.drawPile,
+    ...state.playtest.hand.map((entry) => ({ ...entry, faceDown: false, tapped: false }))
+  ]);
+  const handSize = state.playtest.hand.length;
+  state.playtest.drawPile = nextDeck;
+  state.playtest.hand = [];
+  for (let index = 0; index < handSize; index += 1) {
+    if (!state.playtest.drawPile.length) {
+      break;
+    }
+    const card = state.playtest.drawPile.shift();
+    state.playtest.hand.push({ ...card, faceDown: false, tapped: false });
+  }
+  state.playtest.ready = true;
+  persistPlaytestState();
+  renderPlaytestSandbox();
+}
+
+function zoneLabel(zoneName) {
+  return {
+    drawPile: "Draw Pile",
+    hand: "Hand",
+    shields: "Shields",
+    mana: "Mana Zone",
+    battle: "Battle Zone",
+    graveyard: "Graveyard"
+  }[zoneName] || zoneName;
+}
+
+function renderPlaytestZoneEmpty(container, message) {
+  const empty = document.createElement("p");
+  empty.className = "hero-text playtest-zone-empty";
+  empty.textContent = message;
+  container.append(empty);
+}
+
+function playtestActionDefinitions(zoneName, card) {
+  const actions = [];
+  if (zoneName === "hand") {
+    actions.push(
+      { label: "Battle", run: () => movePlaytestCard("hand", card.uid, "battle", { faceDown: false, resetTapped: false }) },
+      { label: "Mana", run: () => movePlaytestCard("hand", card.uid, "mana", { faceDown: false, resetTapped: true, tapped: true }) },
+      { label: "Discard", run: () => movePlaytestCard("hand", card.uid, "graveyard", { faceDown: false, resetTapped: true }) },
+      { label: "Top Deck", run: () => movePlaytestCard("hand", card.uid, "drawPile", { faceDown: false, resetTapped: true, toTop: true }) }
+    );
+  }
+  if (zoneName === "battle") {
+    actions.push(
+      { label: card.tapped ? "Untap" : "Tap", run: () => togglePlaytestTapped("battle", card.uid), tone: "ghost" },
+      { label: "Mana", run: () => movePlaytestCard("battle", card.uid, "mana", { faceDown: false, resetTapped: true }) },
+      { label: "Hand", run: () => movePlaytestCard("battle", card.uid, "hand", { faceDown: false, resetTapped: true }) },
+      { label: "Grave", run: () => movePlaytestCard("battle", card.uid, "graveyard", { faceDown: false, resetTapped: true }) }
+    );
+  }
+  if (zoneName === "mana") {
+    actions.push(
+      { label: card.tapped ? "Ready" : "Tap", run: () => togglePlaytestTapped("mana", card.uid), tone: "ghost" },
+      { label: "Hand", run: () => movePlaytestCard("mana", card.uid, "hand", { faceDown: false, resetTapped: true }) },
+      { label: "Battle", run: () => movePlaytestCard("mana", card.uid, "battle", { faceDown: false, resetTapped: true }) },
+      { label: "Grave", run: () => movePlaytestCard("mana", card.uid, "graveyard", { faceDown: false, resetTapped: true }) }
+    );
+  }
+  if (zoneName === "graveyard") {
+    actions.push(
+      { label: "Hand", run: () => movePlaytestCard("graveyard", card.uid, "hand", { faceDown: false, resetTapped: true }) },
+      { label: "Battle", run: () => movePlaytestCard("graveyard", card.uid, "battle", { faceDown: false, resetTapped: true }) },
+      { label: "Top Deck", run: () => movePlaytestCard("graveyard", card.uid, "drawPile", { faceDown: false, resetTapped: true, toTop: true }) }
+    );
+  }
+  if (zoneName === "shields") {
+    actions.push(
+      { label: card.faceDown ? "Reveal" : "Hide", run: () => toggleShieldReveal(card.uid), tone: "ghost" },
+      { label: "Break to Hand", run: () => movePlaytestCard("shields", card.uid, "hand", { faceDown: false, resetTapped: true }) },
+      { label: "Send Grave", run: () => movePlaytestCard("shields", card.uid, "graveyard", { faceDown: false, resetTapped: true }) }
+    );
+  }
+  return actions;
+}
+
+function buildPlaytestCard(zoneName, card) {
+  const article = document.createElement("article");
+  article.className = "playtest-card";
+  article.classList.toggle("is-tapped", Boolean(card.tapped));
+  article.classList.toggle("is-facedown", Boolean(card.faceDown));
+
+  const imageButton = document.createElement("button");
+  imageButton.type = "button";
+  imageButton.className = "playtest-card-image-button";
+  imageButton.setAttribute("aria-label", card.faceDown ? "Hidden shield card" : `Open ${card.card.name} card details`);
+  if (card.faceDown) {
+    imageButton.innerHTML = `<span class="playtest-card-back">Shield</span>`;
+  } else {
+    const image = document.createElement("img");
+    image.className = "playtest-card-image";
+    image.src = resolveAssetUrl(card.card.image_path || card.card.illustration_path || DEFAULT_LOGO_URL);
+    image.alt = card.card.name;
+    image.loading = "lazy";
+    image.decoding = "async";
+    imageButton.append(image);
+    imageButton.addEventListener("click", () => openCardDetail(card.card));
+  }
+  article.append(imageButton);
+
+  const body = document.createElement("div");
+  body.className = "playtest-card-body";
+  body.innerHTML = `
+    <div class="playtest-card-copy">
+      <strong>${escapeHtml(card.faceDown ? "Hidden Shield" : card.card.name)}</strong>
+      <span>${escapeHtml(card.faceDown ? "Face-down shield" : `${card.card.cost} mana • ${card.card.type}`)}</span>
+    </div>
+  `;
+
+  const actions = document.createElement("div");
+  actions.className = "playtest-card-actions";
+  for (const action of playtestActionDefinitions(zoneName, card)) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = action.tone === "ghost" ? "small-button ghost-button" : "small-button";
+    button.textContent = action.label;
+    button.addEventListener("click", action.run);
+    actions.append(button);
+  }
+  body.append(actions);
+  article.append(body);
+  return article;
+}
+
+function renderPlaytestPile() {
+  if (!elements.playtestDrawPileZone) {
+    return;
+  }
+  const zone = elements.playtestDrawPileZone;
+  zone.replaceChildren();
+  const pile = state.playtest.drawPile || [];
+  const stack = document.createElement("div");
+  stack.className = "playtest-deck-stack";
+  stack.innerHTML = `
+    <div class="playtest-deck-stack-card"></div>
+    <div class="playtest-deck-stack-card"></div>
+    <div class="playtest-deck-stack-top">${pile.length ? "Deck Ready" : "Empty"}</div>
+  `;
+  zone.append(stack);
+  const meta = document.createElement("div");
+  meta.className = "playtest-pile-meta";
+  meta.innerHTML = `<strong>${pile.length} cards</strong><span>${pile[0] ? `Top card unknown` : "No cards left to draw"}</span>`;
+  zone.append(meta);
+}
+
+function renderPlaytestZone(zoneName, container) {
+  if (!container) {
+    return;
+  }
+  container.replaceChildren();
+  const cards = state.playtest[zoneName] || [];
+  if (!cards.length) {
+    renderPlaytestZoneEmpty(container, `${zoneLabel(zoneName)} is empty.`);
+    return;
+  }
+  for (const card of cards) {
+    container.append(buildPlaytestCard(zoneName, card));
+  }
+}
+
+function renderPlaytestSandbox() {
+  if (!isPlaytestPage) {
+    return;
+  }
+  const hasSource = (state.playtest.sourceCards || []).length > 0;
+  if (elements.playtestTitle) {
+    elements.playtestTitle.textContent = state.playtest.title || "Playtest Sandbox";
+  }
+  if (elements.playtestSubtitle) {
+    elements.playtestSubtitle.textContent = hasSource
+      ? "Goldfish turns, move cards across zones, and test openings without leaving the deckbuilder flow."
+      : "Open a deck from the builder to send it into the sandbox.";
+  }
+  if (elements.playtestEmpty) {
+    elements.playtestEmpty.hidden = hasSource;
+  }
+  if (elements.playtestBoard) {
+    elements.playtestBoard.hidden = !hasSource;
+  }
+  if (elements.playtestTurnValue) {
+    elements.playtestTurnValue.textContent = String(state.playtest.turn || 1);
+  }
+  if (elements.playtestSetupButton) {
+    elements.playtestSetupButton.disabled = !hasSource;
+  }
+  if (elements.playtestDrawButton) {
+    elements.playtestDrawButton.disabled = !hasSource || state.playtest.drawPile.length === 0;
+  }
+  if (elements.playtestMulliganButton) {
+    elements.playtestMulliganButton.disabled = !hasSource || state.playtest.hand.length === 0;
+  }
+  if (elements.playtestShuffleButton) {
+    elements.playtestShuffleButton.disabled = !hasSource || state.playtest.drawPile.length < 2;
+  }
+  if (elements.playtestResetButton) {
+    elements.playtestResetButton.disabled = !hasSource;
+  }
+  if (elements.playtestDrawCount) elements.playtestDrawCount.textContent = String(state.playtest.drawPile.length);
+  if (elements.playtestShieldCount) elements.playtestShieldCount.textContent = String(state.playtest.shields.length);
+  if (elements.playtestHandCount) elements.playtestHandCount.textContent = String(state.playtest.hand.length);
+  if (elements.playtestBattleCount) elements.playtestBattleCount.textContent = String(state.playtest.battle.length);
+  if (elements.playtestManaCount) elements.playtestManaCount.textContent = String(state.playtest.mana.length);
+  if (elements.playtestGraveCount) elements.playtestGraveCount.textContent = String(state.playtest.graveyard.length);
+  if (!hasSource) {
+    return;
+  }
+  renderPlaytestPile();
+  renderPlaytestZone("shields", elements.playtestShieldsZone);
+  renderPlaytestZone("hand", elements.playtestHandZone);
+  renderPlaytestZone("battle", elements.playtestBattleZone);
+  renderPlaytestZone("mana", elements.playtestManaZone);
+  renderPlaytestZone("graveyard", elements.playtestGraveyardZone);
+}
+
+async function loadPlaytestSandbox() {
+  let payload = null;
+  try {
+    payload = JSON.parse(window.sessionStorage.getItem(PLAYTEST_STORAGE_KEY) || "null");
+  } catch {
+    payload = null;
+  }
+  if ((!payload || !(payload.sourceCards || []).length) && window.location.protocol !== "file:") {
+    const deckId = new URLSearchParams(window.location.search).get("deck");
+    if (deckId) {
+      try {
+        const deckPayload = await fetchJson(withViewer(`${API_BASE}/decks/${deckId}`));
+        payload = emptyPlaytestState(deckPayload.title, deckPayload.cards.map((entry) => entry.card));
+      } catch {
+        payload = null;
+      }
+    }
+  }
+  if (payload) {
+    applyPlaytestState(payload);
+    return;
+  }
+  applyPlaytestState(emptyPlaytestState());
+}
+
+async function openPlaytestSandbox() {
+  if (totalDeckCards() === 0) {
+    setStatus("Build a deck first, then open the playtest sandbox.", "error");
+    return;
+  }
+  await ensureDeckCardsHydratedForPlaytest();
+  const sourceCards = buildPlaytestSourceCards();
+  if (!sourceCards.length) {
+    setStatus("The current deck is missing card data. Search once or reload the deck, then try again.", "error");
+    return;
+  }
+  applyPlaytestState(emptyPlaytestState(deckSnapshotTitle(), sourceCards));
+  setupPlaytestGame();
+  const target = `${playtestPagePath()}${state.loadedShareId && window.location.protocol !== "file:" ? `?deck=${encodeURIComponent(state.loadedShareId)}` : ""}`;
+  window.location.assign(target);
 }
 
 async function loadCardDetailPage() {
@@ -592,22 +1074,38 @@ function ensureNotificationMenu() {
 function ensureAdminMenuLinks() {
   const loggedInProfile = activeProfile();
   const isAdmin = Boolean(loggedInProfile?.is_admin);
+  const navLinks = document.querySelector(".top-nav-links");
   for (const menu of document.querySelectorAll(".profile-dropdown-menu")) {
     const existing = menu.querySelector("[data-admin-menu-link]");
     if (!isAdmin) {
       existing?.remove();
-      continue;
+    } else if (!existing) {
+      const link = document.createElement("a");
+      link.className = "nav-link nav-dropdown-link";
+      link.href = "/admin";
+      link.dataset.adminMenuLink = "true";
+      link.textContent = "Admin";
+      menu.insertBefore(link, menu.querySelector(".nav-link-danger") || null);
     }
-    if (existing) {
-      continue;
-    }
-    const link = document.createElement("a");
-    link.className = "nav-link nav-dropdown-link";
-    link.href = "/admin";
-    link.dataset.adminMenuLink = "true";
-    link.textContent = "Admin";
-    menu.insertBefore(link, menu.querySelector(".nav-link-danger") || null);
   }
+  if (!navLinks) {
+    return;
+  }
+  const topLevelExisting = navLinks.querySelector("[data-admin-top-link]");
+  if (!isAdmin) {
+    topLevelExisting?.remove();
+    return;
+  }
+  if (topLevelExisting) {
+    return;
+  }
+  const topLevelLink = document.createElement("a");
+  topLevelLink.className = "nav-link";
+  topLevelLink.href = "/admin";
+  topLevelLink.dataset.adminTopLink = "true";
+  topLevelLink.textContent = "Admin";
+  const anchorTarget = navLinks.querySelector(".nav-notification-dropdown, .nav-avatar-dropdown, [data-profile-menu]");
+  navLinks.insertBefore(topLevelLink, anchorTarget || null);
 }
 
 async function markNotificationsRead() {
@@ -739,6 +1237,9 @@ function bindEvents() {
   window.addEventListener("resize", repositionOpenNavDropdowns);
   window.addEventListener("scroll", repositionOpenNavDropdowns, true);
   elements.exportSelect?.addEventListener("change", handleExportSelection);
+  elements.openPlaytestButton?.addEventListener("click", () => {
+    void openPlaytestSandbox();
+  });
   elements.exploreTypeSelect?.addEventListener("change", handleExploreTypeChange);
   elements.exploreSearchInput?.addEventListener("input", (event) => {
     state.exploreSearch = event.target.value.trim().toLowerCase();
@@ -770,6 +1271,17 @@ function bindEvents() {
     syncBuilderViewControl();
     renderBuilder();
   });
+  elements.toggleHistoryButton?.addEventListener("click", () => {
+    state.historyOpen = !state.historyOpen;
+    renderBuilder();
+  });
+  elements.deckWorkspaceTitle?.addEventListener("click", promptRenameDeckTitle);
+  elements.deckWorkspaceTitle?.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      promptRenameDeckTitle();
+    }
+  });
 
   elements.searchInput?.addEventListener("input", (event) => {
     state.filters.search = event.target.value.trim();
@@ -790,6 +1302,32 @@ function bindEvents() {
     state.filters.maxCost = Number(event.target.value);
     elements.costFilterValue.textContent = event.target.value;
     scheduleCardSearch(isDeckEditorPage ? 48 : 120);
+  });
+  elements.resetFiltersButton?.addEventListener("click", resetDeckEditorFilters);
+  elements.playtestSetupButton?.addEventListener("click", () => {
+    setupPlaytestGame();
+    setStatus(`Playtest ready: ${state.playtest.title}`, "success");
+  });
+  elements.playtestDrawButton?.addEventListener("click", () => drawPlaytestCards(1));
+  elements.playtestMulliganButton?.addEventListener("click", mulliganPlaytestHand);
+  elements.playtestShuffleButton?.addEventListener("click", () => {
+    state.playtest.drawPile = shuffleArray(state.playtest.drawPile);
+    persistPlaytestState();
+    renderPlaytestSandbox();
+  });
+  elements.playtestResetButton?.addEventListener("click", () => {
+    setupPlaytestGame();
+    setStatus(`Sandbox reset for ${state.playtest.title}.`, "success");
+  });
+  elements.playtestTurnDec?.addEventListener("click", () => {
+    state.playtest.turn = Math.max(1, (state.playtest.turn || 1) - 1);
+    persistPlaytestState();
+    renderPlaytestSandbox();
+  });
+  elements.playtestTurnInc?.addEventListener("click", () => {
+    state.playtest.turn = (state.playtest.turn || 1) + 1;
+    persistPlaytestState();
+    renderPlaytestSandbox();
   });
 
   elements.printDeckSelect?.addEventListener("change", async (event) => {
@@ -901,6 +1439,38 @@ function syncBuilderViewControl() {
   if (elements.builderViewSelect) {
     elements.builderViewSelect.value = state.builderView === "text" ? "text" : "image";
   }
+}
+
+function resetDeckEditorFilters() {
+  state.filters.search = "";
+  state.filters.civilization = "all";
+  state.filters.type = "all";
+  state.filters.maxCost = state.filterDefaults.maxCost;
+  if (elements.searchInput) elements.searchInput.value = "";
+  if (elements.civilizationFilter) elements.civilizationFilter.value = "all";
+  if (elements.typeFilter) elements.typeFilter.value = "all";
+  if (elements.costFilter) elements.costFilter.value = String(state.filterDefaults.maxCost);
+  if (elements.costFilterValue) elements.costFilterValue.textContent = String(state.filterDefaults.maxCost);
+  scheduleCardSearch(isDeckEditorPage ? 48 : 120);
+}
+
+function promptRenameDeckTitle() {
+  if (state.deckReadOnly || !elements.deckTitleInput) {
+    return;
+  }
+  const currentTitle = deckSnapshotTitle();
+  const nextTitle = window.prompt("Rename deck", currentTitle);
+  if (nextTitle === null) {
+    return;
+  }
+  const trimmed = nextTitle.trim();
+  if (!trimmed || trimmed === currentTitle) {
+    return;
+  }
+  elements.deckTitleInput.value = trimmed;
+  persistDeckSnapshot();
+  markDeckDirty("Updated deck title");
+  renderBuilder();
 }
 
 async function hydrateProfiles() {
@@ -1411,6 +1981,146 @@ function closeExportModal() {
   }
 }
 
+function ensureAdminMonthModal() {
+  if (document.querySelector("#admin-month-modal")) {
+    elements.adminMonthModal = document.querySelector("#admin-month-modal");
+    elements.adminMonthModalTitle = document.querySelector("#admin-month-modal-title");
+    elements.adminMonthModalLabel = document.querySelector("#admin-month-modal-label");
+    elements.adminMonthProfilesList = document.querySelector("#admin-month-profiles-list");
+    elements.adminMonthDecksList = document.querySelector("#admin-month-decks-list");
+    elements.closeAdminMonthModal = document.querySelector("#close-admin-month-modal");
+    elements.closeAdminMonthModalTargets = [...document.querySelectorAll("[data-close-admin-month-modal]")];
+    return;
+  }
+  const wrapper = document.createElement("div");
+  wrapper.innerHTML = `
+    <div id="admin-month-modal" class="modal-shell" hidden>
+      <div class="modal-backdrop" data-close-admin-month-modal></div>
+      <section class="panel modal-panel admin-month-modal-panel">
+        <div class="panel-header">
+          <div>
+            <p class="section-label">Monthly Drilldown</p>
+            <h2 id="admin-month-modal-title">Monthly activity</h2>
+            <p id="admin-month-modal-label" class="hero-text">Explore the users and decks created during this month.</p>
+          </div>
+          <button id="close-admin-month-modal" type="button" class="ghost-button">Close</button>
+        </div>
+        <div class="admin-month-modal-grid">
+          <section class="summary-card">
+            <p class="section-label">Users</p>
+            <h3>Joined this month</h3>
+            <div id="admin-month-profiles-list" class="admin-month-detail-list"></div>
+          </section>
+          <section class="summary-card">
+            <p class="section-label">Decks</p>
+            <h3>Created this month</h3>
+            <div id="admin-month-decks-list" class="admin-month-detail-list"></div>
+          </section>
+        </div>
+      </section>
+    </div>
+  `;
+  document.body.append(wrapper.firstElementChild);
+  elements.adminMonthModal = document.querySelector("#admin-month-modal");
+  elements.adminMonthModalTitle = document.querySelector("#admin-month-modal-title");
+  elements.adminMonthModalLabel = document.querySelector("#admin-month-modal-label");
+  elements.adminMonthProfilesList = document.querySelector("#admin-month-profiles-list");
+  elements.adminMonthDecksList = document.querySelector("#admin-month-decks-list");
+  elements.closeAdminMonthModal = document.querySelector("#close-admin-month-modal");
+  elements.closeAdminMonthModalTargets = [...document.querySelectorAll("[data-close-admin-month-modal]")];
+  elements.closeAdminMonthModal?.addEventListener("click", closeAdminMonthModal);
+  for (const target of elements.closeAdminMonthModalTargets) {
+    target.addEventListener("click", closeAdminMonthModal);
+  }
+}
+
+function closeAdminMonthModal() {
+  if (elements.adminMonthModal) {
+    elements.adminMonthModal.hidden = true;
+  }
+}
+
+async function openAdminMonthModal(label) {
+  if (!state.activeProfileId || !activeProfile()?.is_admin) {
+    return;
+  }
+  ensureAdminMonthModal();
+  if (!elements.adminMonthModal) {
+    return;
+  }
+  elements.adminMonthModal.hidden = false;
+  if (elements.adminMonthModalTitle) {
+    elements.adminMonthModalTitle.textContent = `Monthly activity for ${label}`;
+  }
+  if (elements.adminMonthModalLabel) {
+    elements.adminMonthModalLabel.textContent = "Loading users and decks for this month...";
+  }
+  if (elements.adminMonthProfilesList) {
+    elements.adminMonthProfilesList.innerHTML = '<p class="hero-text">Loading users...</p>';
+  }
+  if (elements.adminMonthDecksList) {
+    elements.adminMonthDecksList.innerHTML = '<p class="hero-text">Loading decks...</p>';
+  }
+  let payload;
+  try {
+    payload = await fetchJson(`${API_BASE}/admin/month-details?admin_profile_id=${state.activeProfileId}&month=${encodeURIComponent(label)}`);
+  } catch (error) {
+    if (elements.adminMonthModalLabel) {
+      elements.adminMonthModalLabel.textContent = error.message || "Monthly activity could not be loaded.";
+    }
+    if (elements.adminMonthProfilesList) {
+      elements.adminMonthProfilesList.innerHTML = '<p class="hero-text">No user details available.</p>';
+    }
+    if (elements.adminMonthDecksList) {
+      elements.adminMonthDecksList.innerHTML = '<p class="hero-text">No deck details available.</p>';
+    }
+    return;
+  }
+  if (elements.adminMonthModalLabel) {
+    elements.adminMonthModalLabel.textContent = `${payload.profiles.length} users joined and ${payload.decks.length} decks were created in ${payload.label}.`;
+  }
+  if (elements.adminMonthProfilesList) {
+    elements.adminMonthProfilesList.replaceChildren();
+    if (!payload.profiles.length) {
+      const empty = document.createElement("p");
+      empty.className = "hero-text";
+      empty.textContent = "No users joined in this month.";
+      elements.adminMonthProfilesList.append(empty);
+    } else {
+      for (const profile of payload.profiles) {
+        const item = document.createElement("article");
+        item.className = "admin-month-detail-card";
+        item.innerHTML = `
+          <strong>${escapeHtml(displayUsername(profile.username))}</strong>
+          <span>${escapeHtml(profile.email || "No email")}</span>
+          <small>${profile.email_verified ? "Verified" : "Unverified"} • ${escapeHtml(profile.created_at_label)}</small>
+        `;
+        elements.adminMonthProfilesList.append(item);
+      }
+    }
+  }
+  if (elements.adminMonthDecksList) {
+    elements.adminMonthDecksList.replaceChildren();
+    if (!payload.decks.length) {
+      const empty = document.createElement("p");
+      empty.className = "hero-text";
+      empty.textContent = "No decks were created in this month.";
+      elements.adminMonthDecksList.append(empty);
+    } else {
+      for (const deck of payload.decks) {
+        const item = document.createElement("article");
+        item.className = "admin-month-detail-card";
+        item.innerHTML = `
+          <strong>${escapeHtml(deck.title)}</strong>
+          <span>${deck.card_total} cards • ${escapeHtml(deck.visibility)}</span>
+          <small>${deck.owner_username ? `by ${escapeHtml(displayUsername(deck.owner_username))} • ` : ""}${escapeHtml(deck.created_at_label)}</small>
+        `;
+        elements.adminMonthDecksList.append(item);
+      }
+    }
+  }
+}
+
 function renderNotifications() {
   if (!elements.notificationList) {
     return;
@@ -1600,9 +2310,13 @@ function renderAdminPage() {
     if (!container) return;
     container.replaceChildren();
     for (const row of rows) {
-      const item = document.createElement("div");
-      item.className = "admin-month-row";
+      const item = document.createElement("button");
+      item.type = "button";
+      item.className = "admin-month-row admin-month-row-button";
       item.innerHTML = `<strong>${escapeHtml(row.label)}</strong><span>${escapeHtml(String(row.count))}</span>`;
+      item.addEventListener("click", async () => {
+        await openAdminMonthModal(row.label);
+      });
       container.append(item);
     }
   };
@@ -2177,6 +2891,7 @@ function closeAvatarPickerModal() {
 function openAuthModal() {
   closeSignupModal();
   setAuthModalStatus("", "info", null, "login");
+  setLoginModalAuxActions(false);
   if (elements.authModal) {
     elements.authModal.hidden = false;
   }
@@ -2184,6 +2899,7 @@ function openAuthModal() {
 
 function closeAuthModal() {
   setAuthModalStatus("", "info", null, "login");
+  setLoginModalAuxActions(false);
   if (elements.authModal) {
     elements.authModal.hidden = true;
   }
@@ -2261,20 +2977,46 @@ function ensureAuthModalEnhancements() {
   elements.authModalStatus = ensureStatusNode(elements.authModal, "auth-modal-status");
   elements.signupModalStatus = ensureStatusNode(elements.signupModal, "signup-modal-status");
 
-  if (elements.resendVerificationButton) {
+  if (elements.resendVerificationButton && elements.loginSignupShortcutButton) {
     return;
   }
   const loginButton = elements.loginButton;
   if (!loginButton) {
     return;
   }
+  const actionRow = document.createElement("div");
+  actionRow.className = "hero-actions";
+  loginButton.insertAdjacentElement("afterend", actionRow);
+
+  const signupButton = document.createElement("button");
+  signupButton.type = "button";
+  signupButton.id = "login-signup-shortcut-button";
+  signupButton.className = "ghost-button";
+  signupButton.textContent = "Sign Up";
+  signupButton.addEventListener("click", openSignupModal);
+  actionRow.append(signupButton);
+  elements.loginSignupShortcutButton = signupButton;
+
   const button = document.createElement("button");
   button.type = "button";
   button.id = "resend-verification-button";
   button.className = "ghost-button";
   button.textContent = "Resend Verification Email";
-  loginButton.insertAdjacentElement("afterend", button);
+  button.hidden = true;
+  button.style.display = "none";
+  actionRow.append(button);
   elements.resendVerificationButton = button;
+}
+
+function setLoginModalAuxActions(showResend = false) {
+  if (elements.resendVerificationButton) {
+    elements.resendVerificationButton.hidden = !showResend;
+    elements.resendVerificationButton.style.display = showResend ? "" : "none";
+  }
+  if (elements.loginSignupShortcutButton) {
+    elements.loginSignupShortcutButton.hidden = showResend;
+    elements.loginSignupShortcutButton.style.display = showResend ? "none" : "";
+  }
 }
 
 function setAuthModalStatus(message, type = "info", action = null, target = "login") {
@@ -3099,10 +3841,18 @@ function renderBuilder() {
   }
   const showReadOnlyOwnerPanel = Boolean(state.deckReadOnly && state.loadedDeckOwner);
   if (elements.deckWorkspaceTitle) {
-    elements.deckWorkspaceTitle.textContent = showReadOnlyOwnerPanel ? "Deck Owner" : "Your working list";
+    elements.deckWorkspaceTitle.textContent = deckSnapshotTitle();
+    elements.deckWorkspaceTitle.classList.toggle("is-read-only", state.deckReadOnly);
   }
   if (elements.deckBackgroundField) {
     elements.deckBackgroundField.hidden = showReadOnlyOwnerPanel;
+  }
+  if (elements.deckHistoryPanel) {
+    elements.deckHistoryPanel.hidden = !state.historyOpen;
+  }
+  if (elements.toggleHistoryButton) {
+    elements.toggleHistoryButton.textContent = state.historyOpen ? "Hide History" : "History";
+    elements.toggleHistoryButton.classList.toggle("is-active", state.historyOpen);
   }
   if (elements.deckOwnerPanel) {
     elements.deckOwnerPanel.hidden = !showReadOnlyOwnerPanel;
@@ -3997,6 +4747,8 @@ async function loginProfile() {
       body: JSON.stringify({ email, password })
     });
   } catch (error) {
+    const shouldShowResend = /verify|verification|verified/i.test(error.message || "");
+    setLoginModalAuxActions(shouldShowResend);
     setAuthModalStatus(error.message || "Login failed.", "error", null, "login");
     setStatus(error.message || "Login failed.", "error");
     return;
@@ -4012,6 +4764,7 @@ async function loginProfile() {
     await loadAdminOverview();
   }
   closeAuthModal();
+  setLoginModalAuxActions(false);
   renderWelcome();
   renderAuthNavigation();
   renderNotifications();
@@ -4025,6 +4778,7 @@ async function loginProfile() {
 async function resendVerificationEmail() {
   const email = elements.loginEmail?.value.trim() || elements.registerEmail?.value.trim() || "";
   if (!email) {
+    setLoginModalAuxActions(true);
     setAuthModalStatus("Enter your email first, then resend verification.", "error", null, "login");
     setStatus("Enter your email first, then resend verification.", "error");
     return;
@@ -4037,10 +4791,12 @@ async function resendVerificationEmail() {
       body: JSON.stringify({ email })
     });
   } catch (error) {
+    setLoginModalAuxActions(true);
     setAuthModalStatus(error.message || "Verification email resend failed.", "error", null, "login");
     setStatus(error.message || "Verification email resend failed.", "error");
     return;
   }
+  setLoginModalAuxActions(true);
   const level = payload.status === "error" ? "error" : "success";
   setAuthModalStatus(
     payload.message || "If the account exists, a verification email has been sent.",

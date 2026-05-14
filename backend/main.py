@@ -27,6 +27,9 @@ from .pdf_service import build_deck_pdf
 from .schemas import (
     AdminBanIn,
     AdminEmailIn,
+    AdminMonthDeckOut,
+    AdminMonthDetailsOut,
+    AdminMonthProfileOut,
     AdminNotificationIn,
     AdminOverviewOut,
     AdminVerifyIn,
@@ -281,7 +284,7 @@ def build_email_shell(*, eyebrow: str, title: str, intro: str, body_html: str, f
         <div style="max-width:640px;margin:0 auto;padding:32px 18px;">
           <div style="background:linear-gradient(160deg,#0f1728 0%,#101a30 45%,#12233f 100%);border:1px solid rgba(118,227,255,0.18);border-radius:28px;padding:32px 28px;box-shadow:0 22px 60px rgba(6,12,30,0.45);">
             <div style="text-align:center;margin-bottom:22px;">
-              <img src="{APP_BASE_URL}/assets/crystal-vault-logo.png" alt="Paladin's Vault" style="width:92px;height:auto;display:block;margin:0 auto 12px;">
+              <img src="{APP_BASE_URL}/assets/assets/crystal-vault-logo.png?v=20260505w" alt="Paladin's Vault" style="width:92px;height:auto;display:block;margin:0 auto 12px;">
               <div style="letter-spacing:0.22em;text-transform:uppercase;font-size:11px;color:#7eddf6;">{eyebrow}</div>
               <h1 style="margin:10px 0 8px;font-size:30px;line-height:1.15;color:#ffffff;font-family:'Georgia',serif;">{title}</h1>
               <p style="margin:0 auto;max-width:480px;font-size:15px;line-height:1.7;color:#c7d7f6;">{intro}</p>
@@ -376,6 +379,9 @@ This message was sent from the Paladin's Vault admin dashboard.
   <body style="margin:0;padding:0;background:#07111b;color:#ecf8ff;font-family:Arial,sans-serif;">
     <div style="max-width:640px;margin:0 auto;padding:32px 20px;">
       <div style="padding:24px;border-radius:24px;background:linear-gradient(180deg,#0c1724,#09111d);border:1px solid rgba(167,220,255,.18);">
+        <div style="text-align:center;margin:0 0 16px;">
+          <img src="{APP_BASE_URL}/assets/assets/crystal-vault-logo.png?v=20260505w" alt="Paladin's Vault" style="width:84px;height:auto;display:block;margin:0 auto 10px;">
+        </div>
         <p style="margin:0 0 12px;color:#86dfff;font-size:12px;letter-spacing:.14em;text-transform:uppercase;">Paladin's Vault Admin</p>
         <h1 style="margin:0 0 18px;font-size:28px;line-height:1.15;color:#f5fcff;">{subject}</h1>
         <p style="margin:0 0 18px;color:#d7ecff;line-height:1.75;">Hello {recipient_name},</p>
@@ -655,6 +661,11 @@ def builder_page() -> HTMLResponse:
 @app.get("/builder/editor", response_class=HTMLResponse)
 def builder_editor_page() -> HTMLResponse:
     return render_page("deck-editor.html")
+
+
+@app.get("/playtest", response_class=HTMLResponse)
+def playtest_page() -> HTMLResponse:
+    return render_page("playtest.html")
 
 
 @app.get("/cards", response_class=HTMLResponse)
@@ -1146,6 +1157,59 @@ def admin_overview(admin_profile_id: int, db: Session = Depends(get_db)) -> Admi
             for audit in audits
         ],
         recent_contact_messages=[contact_message_to_out(item) for item in contact_messages],
+    )
+
+
+@app.get("/api/admin/month-details", response_model=AdminMonthDetailsOut)
+def admin_month_details(admin_profile_id: int, month: str, db: Session = Depends(get_db)) -> AdminMonthDetailsOut:
+    require_admin(admin_profile_id, db)
+    try:
+        month_start = datetime.strptime(month, "%Y-%m")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Month must use YYYY-MM format.") from exc
+    if month_start.month == 12:
+        month_end = datetime(month_start.year + 1, 1, 1)
+    else:
+        month_end = datetime(month_start.year, month_start.month + 1, 1)
+
+    profiles = db.execute(
+        select(Profile)
+        .where(
+            func.coalesce(Profile.email_verified_at, Profile.verification_sent_at) >= month_start,
+            func.coalesce(Profile.email_verified_at, Profile.verification_sent_at) < month_end,
+        )
+        .order_by(func.coalesce(Profile.email_verified_at, Profile.verification_sent_at).desc(), Profile.id.desc())
+    ).scalars().all()
+    decks = db.execute(
+        select(Deck)
+        .options(joinedload(Deck.profile), joinedload(Deck.items).joinedload(DeckItem.card))
+        .where(Deck.created_at >= month_start, Deck.created_at < month_end)
+        .order_by(Deck.created_at.desc(), Deck.id.desc())
+    ).unique().scalars().all()
+
+    return AdminMonthDetailsOut(
+        label=month,
+        profiles=[
+            AdminMonthProfileOut(
+                id=profile.id,
+                username=profile.username,
+                email=profile.email,
+                email_verified=bool(profile.email_verified_at),
+                created_at_label=(profile.email_verified_at or profile.verification_sent_at or month_start).strftime("%Y-%m-%d %H:%M"),
+            )
+            for profile in profiles
+        ],
+        decks=[
+            AdminMonthDeckOut(
+                public_id=deck.public_id,
+                title=deck.title,
+                visibility=deck.visibility,
+                owner_username=deck.profile.username if deck.profile else None,
+                card_total=sum(item.quantity for item in deck.items),
+                created_at_label=deck.created_at.strftime("%Y-%m-%d %H:%M"),
+            )
+            for deck in decks
+        ],
     )
 
 

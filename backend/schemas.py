@@ -253,6 +253,29 @@ class MonthlyStatOut(BaseModel):
     count: int
 
 
+class AdminMonthProfileOut(BaseModel):
+    id: int
+    username: str
+    email: str | None = None
+    email_verified: bool = False
+    created_at_label: str
+
+
+class AdminMonthDeckOut(BaseModel):
+    public_id: str
+    title: str
+    visibility: str = "public"
+    owner_username: str | None = None
+    card_total: int
+    created_at_label: str
+
+
+class AdminMonthDetailsOut(BaseModel):
+    label: str
+    profiles: list[AdminMonthProfileOut]
+    decks: list[AdminMonthDeckOut]
+
+
 class AdminOverviewOut(BaseModel):
     total_profiles: int
     total_decks: int

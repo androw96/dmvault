@@ -1252,6 +1252,116 @@ textarea:focus {
   gap: 14px;
 }
 
+.deck-workspace-header {
+  display: grid;
+  gap: 12px;
+}
+
+.deck-workspace-title {
+  margin: 0;
+  font-size: clamp(2.1rem, 4vw, 3.6rem);
+  line-height: 0.98;
+  letter-spacing: 0.01em;
+  color: #f7fcff;
+  text-shadow: 0 12px 30px rgba(96, 190, 255, 0.14);
+}
+
+.deck-workspace-title:not(.is-read-only) {
+  cursor: pointer;
+}
+
+.deck-workspace-title:not(.is-read-only):hover,
+.deck-workspace-title:not(.is-read-only):focus-visible {
+  color: #ffffff;
+}
+
+.workspace-control-stack {
+  display: grid;
+  gap: 14px;
+  justify-items: end;
+}
+
+.view-panel {
+  min-width: min(100%, 620px);
+  display: grid;
+  gap: 10px;
+  padding: 14px 16px;
+  border-radius: 20px;
+  border: 1px solid rgba(157, 213, 255, 0.14);
+  background:
+    linear-gradient(145deg, rgba(255, 255, 255, 0.08), transparent 36%),
+    rgba(255, 255, 255, 0.035);
+}
+
+.view-panel-dropdown {
+  min-width: 210px;
+  width: min(100%, 620px);
+}
+
+.view-panel-toggle {
+  width: 100%;
+  justify-content: center;
+}
+
+.view-panel-dropdown[open] {
+  padding-bottom: 16px;
+}
+
+.view-panel-dropdown:not([open]) {
+  gap: 0;
+  padding: 0;
+  border: none;
+  background: none;
+}
+
+.view-panel-dropdown:not([open]) .view-panel-grid {
+  display: none;
+}
+
+.view-panel-grid {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 12px;
+  align-items: end;
+}
+
+.deck-builder-toolbar {
+  margin: 18px 0 8px;
+  display: grid;
+  grid-template-columns: minmax(320px, 1.7fr) repeat(2, minmax(150px, 0.8fr)) minmax(210px, 1fr) auto;
+  gap: 14px;
+  align-items: stretch;
+}
+
+.deck-search-field,
+.builder-filter-field,
+.builder-cost-field {
+  gap: 10px;
+  padding: 14px 16px;
+  border-radius: 20px;
+  border: 1px solid rgba(157, 213, 255, 0.14);
+  background:
+    linear-gradient(145deg, rgba(255, 255, 255, 0.08), transparent 36%),
+    rgba(255, 255, 255, 0.035);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  min-height: 86px;
+}
+
+.deck-builder-toolbar > .field > span,
+.view-panel > .section-label {
+  margin: 0;
+  color: #dcecff;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  font-size: 0.7rem;
+  font-weight: 700;
+}
+
+.builder-cost-field input[type="range"] {
+  width: 100%;
+  accent-color: #81d7ff;
+}
+
 .deck-title-field {
   min-width: 0;
 }
@@ -1347,16 +1457,15 @@ textarea:focus {
   gap: 8px;
 }
 
-.workspace-background-field > span {
-  color: #dcecff;
-  text-transform: uppercase;
-  letter-spacing: 0.12em;
-  font-size: 0.7rem;
-  font-weight: 700;
-}
-
 .deck-workspace .workspace-top .workspace-background-field select {
   min-height: 44px;
+}
+
+.toggle-history-button.is-active,
+#toggle-history-button.is-active {
+  border-color: rgba(134, 234, 255, 0.34);
+  background: rgba(113, 204, 255, 0.12);
+  color: #f2fbff;
 }
 
 .deck-owner-panel {
@@ -1403,6 +1512,251 @@ textarea:focus {
   display: grid;
   gap: 10px;
   min-width: 180px;
+}
+
+.playtest-hero-panel,
+.playtest-board-panel {
+  position: relative;
+  overflow: hidden;
+}
+
+.playtest-hero-panel::before,
+.playtest-board-panel::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(circle at top left, rgba(118, 226, 255, 0.18), transparent 36%),
+    radial-gradient(circle at bottom right, rgba(248, 205, 120, 0.12), transparent 38%);
+  pointer-events: none;
+}
+
+.playtest-hero-panel > *,
+.playtest-board-panel > * {
+  position: relative;
+  z-index: 1;
+}
+
+.playtest-hero-header {
+  align-items: start;
+}
+
+.playtest-top-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.playtest-control-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+  margin-top: 18px;
+}
+
+.playtest-turn-control {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border-radius: 999px;
+  border: 1px solid rgba(157, 213, 255, 0.18);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.playtest-turn-control span {
+  color: #dcecff;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.playtest-turn-control strong {
+  min-width: 1.5rem;
+  text-align: center;
+  font-size: 1.1rem;
+}
+
+.playtest-stat-cards {
+  margin-top: 18px;
+}
+
+.playtest-board {
+  display: grid;
+  gap: 18px;
+}
+
+.playtest-zone {
+  padding: 18px;
+  border-radius: 24px;
+  border: 1px solid rgba(157, 213, 255, 0.14);
+  background:
+    linear-gradient(145deg, rgba(255, 255, 255, 0.08), transparent 36%),
+    rgba(255, 255, 255, 0.035);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+.playtest-zone-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: start;
+  margin-bottom: 14px;
+}
+
+.playtest-zone-header h2 {
+  margin: 2px 0 0;
+}
+
+.playtest-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 14px;
+}
+
+.playtest-card-grid-shields {
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+}
+
+.playtest-card {
+  display: grid;
+  grid-template-columns: 110px 1fr;
+  gap: 12px;
+  align-items: start;
+  padding: 12px;
+  border-radius: 20px;
+  border: 1px solid rgba(157, 213, 255, 0.14);
+  background: rgba(12, 22, 33, 0.5);
+  transition: transform 180ms ease, border-color 180ms ease;
+}
+
+.playtest-card:hover {
+  transform: translateY(-1px);
+  border-color: rgba(157, 213, 255, 0.28);
+}
+
+.playtest-card.is-tapped {
+  transform: rotate(90deg);
+  transform-origin: center;
+  margin: 34px 0;
+}
+
+.playtest-card-image-button {
+  padding: 0;
+  border: none;
+  background: none;
+  cursor: pointer;
+}
+
+.playtest-card-image,
+.playtest-card-back {
+  display: block;
+  width: 100%;
+  aspect-ratio: 63 / 88;
+  border-radius: 16px;
+  object-fit: cover;
+  box-shadow: 0 16px 30px rgba(0, 0, 0, 0.24);
+}
+
+.playtest-card-back {
+  display: grid;
+  place-items: center;
+  font-family: "Cormorant Garamond", serif;
+  font-size: 1.45rem;
+  letter-spacing: 0.08em;
+  color: #f7fcff;
+  border: 1px solid rgba(157, 213, 255, 0.18);
+  background:
+    radial-gradient(circle at top, rgba(123, 214, 255, 0.24), transparent 38%),
+    linear-gradient(145deg, rgba(30, 49, 70, 0.94), rgba(7, 13, 21, 0.98));
+}
+
+.playtest-card-body {
+  display: grid;
+  gap: 12px;
+}
+
+.playtest-card-copy {
+  display: grid;
+  gap: 6px;
+}
+
+.playtest-card-copy strong {
+  font-size: 1rem;
+  line-height: 1.15;
+}
+
+.playtest-card-copy span {
+  color: var(--muted);
+  font-size: 0.86rem;
+}
+
+.playtest-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.playtest-pile-stack {
+  position: relative;
+  width: min(240px, 100%);
+  aspect-ratio: 63 / 88;
+  margin: 0 auto;
+}
+
+.playtest-deck-stack-card,
+.playtest-deck-stack-top {
+  position: absolute;
+  inset: 0;
+  border-radius: 18px;
+}
+
+.playtest-deck-stack-card:nth-child(1) {
+  transform: translate(12px, 12px);
+  border: 1px solid rgba(157, 213, 255, 0.18);
+  background: rgba(12, 20, 31, 0.82);
+}
+
+.playtest-deck-stack-card:nth-child(2) {
+  transform: translate(6px, 6px);
+  border: 1px solid rgba(157, 213, 255, 0.18);
+  background: rgba(17, 28, 41, 0.88);
+}
+
+.playtest-deck-stack-top {
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(157, 213, 255, 0.22);
+  background:
+    radial-gradient(circle at top, rgba(123, 214, 255, 0.24), transparent 38%),
+    linear-gradient(145deg, rgba(33, 57, 82, 0.96), rgba(8, 13, 21, 0.98));
+  color: #f7fcff;
+  font-family: "Cormorant Garamond", serif;
+  font-size: 1.7rem;
+  letter-spacing: 0.08em;
+  box-shadow: 0 18px 34px rgba(4, 11, 18, 0.28);
+}
+
+.playtest-pile-meta {
+  display: grid;
+  gap: 4px;
+  margin-top: 12px;
+  text-align: center;
+}
+
+.playtest-pile-meta span {
+  color: var(--muted);
+  font-size: 0.86rem;
+}
+
+.playtest-empty-state {
+  padding: 28px 0 4px;
+}
+
+.playtest-zone-empty {
+  margin: 0;
 }
 
 .deck-history-list {
@@ -2352,6 +2706,23 @@ input[type="range"] {
   background: rgba(255, 255, 255, 0.03);
 }
 
+.admin-month-row-button {
+  width: 100%;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+  transition: transform 160ms ease, border-color 160ms ease, background 160ms ease, box-shadow 160ms ease;
+}
+
+.admin-month-row-button:hover,
+.admin-month-row-button:focus-visible {
+  transform: translateY(-1px);
+  border-color: rgba(157, 213, 255, 0.28);
+  background: rgba(125, 208, 255, 0.08);
+  box-shadow: 0 14px 26px rgba(4, 12, 24, 0.18);
+}
+
 .admin-month-row strong,
 .admin-user-row strong {
   color: #f2fbff;
@@ -2367,6 +2738,42 @@ input[type="range"] {
 .admin-user-list {
   display: grid;
   gap: 12px;
+}
+
+.admin-month-modal-panel {
+  width: min(980px, calc(100vw - 28px));
+}
+
+.admin-month-modal-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+}
+
+.admin-month-detail-list {
+  display: grid;
+  gap: 12px;
+}
+
+.admin-month-detail-card {
+  display: grid;
+  gap: 6px;
+  padding: 14px 16px;
+  border-radius: 18px;
+  border: 1px solid rgba(157, 213, 255, 0.12);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.02)),
+    rgba(6, 14, 29, 0.72);
+}
+
+.admin-month-detail-card strong {
+  color: #f2fbff;
+}
+
+.admin-month-detail-card span,
+.admin-month-detail-card small {
+  margin: 0;
+  color: var(--muted);
 }
 
 .cookie-consent-banner {
@@ -2696,6 +3103,7 @@ input[type="range"] {
   .auth-grid,
   .admin-two-column,
   .deck-title-row,
+  .deck-builder-toolbar,
   .workspace-top,
   .builder-bottom-grid,
   .builder-stat-cards,
@@ -2751,6 +3159,44 @@ input[type="range"] {
   .notification-item {
     padding-left: 24px;
   }
+
+  .workspace-control-stack {
+    justify-items: stretch;
+  }
+
+  .view-panel-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .deck-workspace-title {
+    font-size: clamp(1.9rem, 8vw, 2.8rem);
+  }
+
+  .playtest-control-bar {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .playtest-turn-control {
+    margin-left: 0;
+    justify-content: center;
+    grid-column: 1 / -1;
+  }
+
+  .playtest-card-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .playtest-card {
+    grid-template-columns: 92px 1fr;
+  }
+
+  .playtest-card.is-tapped {
+    transform: none;
+    margin: 0;
+    border-color: rgba(129, 215, 255, 0.42);
+    box-shadow: inset 0 0 0 1px rgba(129, 215, 255, 0.24);
+  }
 }
 
 @media (max-width: 540px) {
@@ -2790,6 +3236,20 @@ input[type="range"] {
   .nav-bell-trigger {
     width: 50px;
     height: 50px;
+  }
+
+  .playtest-control-bar {
+    grid-template-columns: 1fr;
+  }
+
+  .playtest-card {
+    grid-template-columns: 1fr;
+  }
+
+  .playtest-card-image,
+  .playtest-card-back {
+    max-width: 180px;
+    margin: 0 auto;
   }
 }
 
@@ -3152,5 +3612,11 @@ input[type="range"] {
   .deck-image-meta span,
   .deck-image-meta small {
     font-size: 0.66rem;
+  }
+}
+
+@media (max-width: 760px) {
+  .admin-month-modal-grid {
+    grid-template-columns: 1fr;
   }
 }
