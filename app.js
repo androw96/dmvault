@@ -121,7 +121,8 @@ const state = {
     graveyard: [],
     turn: 1,
     ready: false
-  }
+  },
+  playtestSelected: null
 };
 
 const elements = {
@@ -536,7 +537,21 @@ function applyPlaytestState(nextState) {
     ...emptyPlaytestState(nextState?.title || "Playtest Sandbox", nextState?.sourceCards || []),
     ...nextState
   };
+  if (
+    state.playtestSelected
+    && !playtestZones().some((zoneName) => (state.playtest[zoneName] || []).some((entry) => entry.uid === state.playtestSelected?.uid))
+  ) {
+    state.playtestSelected = null;
+  }
   persistPlaytestState();
+}
+
+function isSpellCard(card) {
+  return /\bspell\b/i.test(card?.type || "");
+}
+
+function isShieldTriggerCard(card) {
+  return /\bshield\s*trigger\b/i.test(card?.text || "");
 }
 
 function buildPlaytestSourceCards() {
@@ -604,6 +619,7 @@ function movePlaytestCard(sourceZone, uid, targetZone, options = {}) {
   } else {
     target.push(moved);
   }
+  state.playtestSelected = null;
   persistPlaytestState();
   renderPlaytestSandbox();
 }
@@ -618,6 +634,7 @@ function togglePlaytestTapped(zoneName, uid) {
     return;
   }
   card.tapped = !card.tapped;
+  state.playtestSelected = { zone: zoneName, uid };
   persistPlaytestState();
   renderPlaytestSandbox();
 }
@@ -628,6 +645,7 @@ function toggleShieldReveal(uid) {
     return;
   }
   shield.faceDown = !shield.faceDown;
+  state.playtestSelected = { zone: "shields", uid };
   persistPlaytestState();
   renderPlaytestSandbox();
 }
@@ -642,6 +660,7 @@ function drawPlaytestCards(count = 1) {
     state.playtest.hand.push({ ...nextCard, faceDown: false, tapped: false });
   }
   state.playtest.ready = true;
+  state.playtestSelected = null;
   persistPlaytestState();
   renderPlaytestSandbox();
 }
@@ -700,6 +719,7 @@ function mulliganPlaytestHand() {
     state.playtest.hand.push({ ...card, faceDown: false, tapped: false });
   }
   state.playtest.ready = true;
+  state.playtestSelected = null;
   persistPlaytestState();
   renderPlaytestSandbox();
 }
@@ -726,18 +746,26 @@ function playtestActionDefinitions(zoneName, card) {
   const actions = [];
   if (zoneName === "hand") {
     actions.push(
-      { label: "Battle", run: () => movePlaytestCard("hand", card.uid, "battle", { faceDown: false, resetTapped: false }) },
-      { label: "Mana", run: () => movePlaytestCard("hand", card.uid, "mana", { faceDown: false, resetTapped: true, tapped: true }) },
+      {
+        label: "Play",
+        run: () => {
+          if (isSpellCard(card.card)) {
+            movePlaytestCard("hand", card.uid, "graveyard", { faceDown: false, resetTapped: true });
+            return;
+          }
+          movePlaytestCard("hand", card.uid, "battle", { faceDown: false, resetTapped: true });
+        }
+      },
+      { label: "Charge", run: () => movePlaytestCard("hand", card.uid, "mana", { faceDown: false, resetTapped: true }) },
       { label: "Discard", run: () => movePlaytestCard("hand", card.uid, "graveyard", { faceDown: false, resetTapped: true }) },
-      { label: "Top Deck", run: () => movePlaytestCard("hand", card.uid, "drawPile", { faceDown: false, resetTapped: true, toTop: true }) }
     );
   }
   if (zoneName === "battle") {
     actions.push(
       { label: card.tapped ? "Untap" : "Tap", run: () => togglePlaytestTapped("battle", card.uid), tone: "ghost" },
-      { label: "Mana", run: () => movePlaytestCard("battle", card.uid, "mana", { faceDown: false, resetTapped: true }) },
-      { label: "Hand", run: () => movePlaytestCard("battle", card.uid, "hand", { faceDown: false, resetTapped: true }) },
-      { label: "Grave", run: () => movePlaytestCard("battle", card.uid, "graveyard", { faceDown: false, resetTapped: true }) }
+      { label: "Mana Zone", run: () => movePlaytestCard("battle", card.uid, "mana", { faceDown: false, resetTapped: true }) },
+      { label: "Graveyard", run: () => movePlaytestCard("battle", card.uid, "graveyard", { faceDown: false, resetTapped: true }) },
+      { label: "Hand", run: () => movePlaytestCard("battle", card.uid, "hand", { faceDown: false, resetTapped: true }) }
     );
   }
   if (zoneName === "mana") {
@@ -750,16 +778,13 @@ function playtestActionDefinitions(zoneName, card) {
   }
   if (zoneName === "graveyard") {
     actions.push(
-      { label: "Hand", run: () => movePlaytestCard("graveyard", card.uid, "hand", { faceDown: false, resetTapped: true }) },
-      { label: "Battle", run: () => movePlaytestCard("graveyard", card.uid, "battle", { faceDown: false, resetTapped: true }) },
-      { label: "Top Deck", run: () => movePlaytestCard("graveyard", card.uid, "drawPile", { faceDown: false, resetTapped: true, toTop: true }) }
+      { label: "Hand", run: () => movePlaytestCard("graveyard", card.uid, "hand", { faceDown: false, resetTapped: true }) }
     );
   }
   if (zoneName === "shields") {
     actions.push(
-      { label: card.faceDown ? "Reveal" : "Hide", run: () => toggleShieldReveal(card.uid), tone: "ghost" },
-      { label: "Break to Hand", run: () => movePlaytestCard("shields", card.uid, "hand", { faceDown: false, resetTapped: true }) },
-      { label: "Send Grave", run: () => movePlaytestCard("shields", card.uid, "graveyard", { faceDown: false, resetTapped: true }) }
+      { label: "Break", run: () => movePlaytestCard("shields", card.uid, isShieldTriggerCard(card.card) ? "battle" : "hand", { faceDown: false, resetTapped: true }) },
+      { label: "Graveyard", run: () => movePlaytestCard("shields", card.uid, "graveyard", { faceDown: false, resetTapped: true }) }
     );
   }
   return actions;
@@ -770,11 +795,20 @@ function buildPlaytestCard(zoneName, card) {
   article.className = "playtest-card";
   article.classList.toggle("is-tapped", Boolean(card.tapped));
   article.classList.toggle("is-facedown", Boolean(card.faceDown));
+  article.classList.toggle("is-selected", state.playtestSelected?.uid === card.uid && state.playtestSelected?.zone === zoneName);
+  article.addEventListener("click", () => {
+    if (state.playtestSelected?.uid === card.uid && state.playtestSelected?.zone === zoneName) {
+      state.playtestSelected = null;
+    } else {
+      state.playtestSelected = { zone: zoneName, uid: card.uid };
+    }
+    renderPlaytestSandbox();
+  });
 
   const imageButton = document.createElement("button");
   imageButton.type = "button";
   imageButton.className = "playtest-card-image-button";
-  imageButton.setAttribute("aria-label", card.faceDown ? "Hidden shield card" : `Open ${card.card.name} card details`);
+  imageButton.setAttribute("aria-label", card.faceDown ? "Hidden shield card" : card.card.name);
   if (card.faceDown) {
     imageButton.innerHTML = `<span class="playtest-card-back">Shield</span>`;
   } else {
@@ -785,31 +819,34 @@ function buildPlaytestCard(zoneName, card) {
     image.loading = "lazy";
     image.decoding = "async";
     imageButton.append(image);
-    imageButton.addEventListener("click", () => openCardDetail(card.card));
   }
+  imageButton.addEventListener("click", (event) => {
+    event.stopPropagation();
+    if (state.playtestSelected?.uid === card.uid && state.playtestSelected?.zone === zoneName) {
+      state.playtestSelected = null;
+    } else {
+      state.playtestSelected = { zone: zoneName, uid: card.uid };
+    }
+    renderPlaytestSandbox();
+  });
   article.append(imageButton);
 
-  const body = document.createElement("div");
-  body.className = "playtest-card-body";
-  body.innerHTML = `
-    <div class="playtest-card-copy">
-      <strong>${escapeHtml(card.faceDown ? "Hidden Shield" : card.card.name)}</strong>
-      <span>${escapeHtml(card.faceDown ? "Face-down shield" : `${card.card.cost} mana • ${card.card.type}`)}</span>
-    </div>
-  `;
-
-  const actions = document.createElement("div");
-  actions.className = "playtest-card-actions";
-  for (const action of playtestActionDefinitions(zoneName, card)) {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = action.tone === "ghost" ? "small-button ghost-button" : "small-button";
-    button.textContent = action.label;
-    button.addEventListener("click", action.run);
-    actions.append(button);
+  if (state.playtestSelected?.uid === card.uid && state.playtestSelected?.zone === zoneName) {
+    const actions = document.createElement("div");
+    actions.className = "playtest-card-actions";
+    for (const action of playtestActionDefinitions(zoneName, card)) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = action.tone === "ghost" ? "small-button ghost-button" : "small-button";
+      button.textContent = action.label;
+      button.addEventListener("click", (event) => {
+        event.stopPropagation();
+        action.run();
+      });
+      actions.append(button);
+    }
+    article.append(actions);
   }
-  body.append(actions);
-  article.append(body);
   return article;
 }
 
@@ -822,15 +859,27 @@ function renderPlaytestPile() {
   const pile = state.playtest.drawPile || [];
   const stack = document.createElement("div");
   stack.className = "playtest-deck-stack";
+  stack.setAttribute("role", "button");
+  stack.tabIndex = pile.length ? 0 : -1;
+  stack.setAttribute("aria-label", pile.length ? "Draw a card" : "Library is empty");
   stack.innerHTML = `
     <div class="playtest-deck-stack-card"></div>
     <div class="playtest-deck-stack-card"></div>
-    <div class="playtest-deck-stack-top">${pile.length ? "Deck Ready" : "Empty"}</div>
+    <div class="playtest-deck-stack-top"></div>
   `;
+  if (pile.length) {
+    stack.addEventListener("click", () => drawPlaytestCards(1));
+    stack.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        drawPlaytestCards(1);
+      }
+    });
+  }
   zone.append(stack);
   const meta = document.createElement("div");
   meta.className = "playtest-pile-meta";
-  meta.innerHTML = `<strong>${pile.length} cards</strong><span>${pile[0] ? `Top card unknown` : "No cards left to draw"}</span>`;
+  meta.innerHTML = `<strong>${pile.length} cards</strong>`;
   zone.append(meta);
 }
 
@@ -854,21 +903,6 @@ function renderPlaytestSandbox() {
     return;
   }
   const hasSource = (state.playtest.sourceCards || []).length > 0;
-  if (elements.playtestCoverPanel) {
-    const coverImage = resolveAssetUrl(state.playtest.coverImage || DEFAULT_LOGO_URL);
-    elements.playtestCoverPanel.style.setProperty("--playtest-cover-image", `url('${coverImage}')`);
-  }
-  if (elements.playtestOwnerLabel) {
-    elements.playtestOwnerLabel.textContent = state.playtest.ownerLabel || "Paladin's Vault";
-  }
-  if (elements.playtestTitle) {
-    elements.playtestTitle.textContent = state.playtest.title || "Playtest Sandbox";
-  }
-  if (elements.playtestSubtitle) {
-    elements.playtestSubtitle.textContent = hasSource
-      ? "Goldfish turns, move cards across zones, and test openings without leaving the deckbuilder flow."
-      : "Open a deck from the builder to send it into the sandbox.";
-  }
   if (elements.playtestEmpty) {
     elements.playtestEmpty.hidden = hasSource;
   }
@@ -899,7 +933,6 @@ function renderPlaytestSandbox() {
   if (elements.playtestBattleCount) elements.playtestBattleCount.textContent = String(state.playtest.battle.length);
   if (elements.playtestManaCount) elements.playtestManaCount.textContent = String(state.playtest.mana.length);
   if (elements.playtestGraveCount) elements.playtestGraveCount.textContent = String(state.playtest.graveyard.length);
-  renderPlaytestSearchResults();
   if (!hasSource) {
     return;
   }

@@ -2095,7 +2095,27 @@ body[data-page="playtest"] .top-nav {
 
 body[data-page="playtest"] .page-shell {
   width: min(100%, 100%);
-  padding-top: 0;
+  padding: 0;
+}
+
+body[data-page="playtest"] {
+  background:
+    radial-gradient(circle at 18% 12%, rgba(111, 235, 255, 0.12), transparent 22%),
+    radial-gradient(circle at 86% 10%, rgba(126, 168, 255, 0.1), transparent 22%),
+    linear-gradient(180deg, #040a12 0%, #08111c 42%, #060d17 100%);
+}
+
+body[data-page="playtest"]::before {
+  background:
+    linear-gradient(125deg, transparent 0 38%, rgba(255, 255, 255, 0.02) 45%, transparent 52%),
+    linear-gradient(215deg, transparent 0 48%, rgba(126, 168, 255, 0.04) 54%, transparent 60%);
+}
+
+body[data-page="playtest"]::after {
+  background-image:
+    radial-gradient(circle at 22% 28%, rgba(255, 255, 255, 0.08) 0 1px, transparent 1.5px),
+    radial-gradient(circle at 68% 16%, rgba(131, 235, 255, 0.08) 0 1px, transparent 1.5px),
+    radial-gradient(circle at 74% 72%, rgba(126, 168, 255, 0.08) 0 1px, transparent 1.5px);
 }
 
 body[data-page="playtest"] .page-stack {
@@ -2289,7 +2309,17 @@ body[data-page="playtest"] .page-stack {
   border-left: none;
   border-right: none;
   border-top: none;
-  background: linear-gradient(180deg, rgba(32, 32, 34, 0.995), rgba(24, 24, 26, 0.995));
+  background: linear-gradient(180deg, rgba(7, 17, 29, 0.995), rgba(6, 13, 23, 0.995));
+}
+
+.playtest-board-panel-clean {
+  min-height: 100vh;
+  padding-top: 16px;
+}
+
+.playtest-inline-status {
+  margin: 0 0 12px;
+  min-height: 24px;
 }
 
 .playtest-table {
@@ -2302,7 +2332,7 @@ body[data-page="playtest"] .page-stack {
   padding: 18px 18px 16px;
   border-radius: 0;
   border: 1px solid rgba(255, 255, 255, 0.06);
-  background: linear-gradient(180deg, rgba(34, 34, 36, 0.995), rgba(28, 28, 30, 0.995));
+  background: linear-gradient(180deg, rgba(9, 20, 34, 0.995), rgba(7, 16, 28, 0.995));
 }
 
 .playtest-battlefield-grid {
@@ -2325,7 +2355,7 @@ body[data-page="playtest"] .page-stack {
 }
 
 .playtest-battlefield-meta {
-  color: rgba(234, 233, 240, 0.72);
+  color: rgba(220, 235, 252, 0.76);
   font-size: 0.9rem;
 }
 
@@ -2427,93 +2457,107 @@ body[data-page="playtest"] .page-stack {
 }
 
 .playtest-card {
-  border-radius: 14px;
-  background: rgba(14, 14, 17, 0.74);
+  position: relative;
+  display: grid;
+  gap: 8px;
+  padding: 0;
+  border-radius: 16px;
+  background: transparent;
+  border: none;
+  justify-items: center;
+}
+
+.playtest-card.is-selected .playtest-card-image,
+.playtest-card.is-selected .playtest-card-back {
+  box-shadow:
+    0 0 0 2px rgba(129, 215, 255, 0.55),
+    0 18px 30px rgba(2, 8, 16, 0.34);
+}
+
+.playtest-card.is-tapped {
+  transform: none;
+  margin: 0;
+}
+
+.playtest-card.is-tapped .playtest-card-image,
+.playtest-card.is-tapped .playtest-card-back {
+  transform: rotate(90deg);
+  transform-origin: center;
+}
+
+.playtest-card-image-button {
+  padding: 0;
+  border: none;
+  background: none;
+  cursor: pointer;
+}
+
+.playtest-card-image,
+.playtest-card-back {
+  display: block;
+  width: 100%;
+  aspect-ratio: 63 / 88;
+  border-radius: 16px;
+  object-fit: cover;
+  box-shadow: 0 14px 26px rgba(0, 0, 0, 0.3);
+  transition: transform 180ms ease, box-shadow 180ms ease;
+}
+
+.playtest-inline-card-row-hand > * {
+  width: 150px;
+}
+
+.playtest-inline-card-row-shields > * {
+  width: 118px;
+}
+
+.playtest-card-grid-battle {
+  grid-template-columns: repeat(auto-fit, minmax(132px, max-content));
+  gap: 16px;
+}
+
+.playtest-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  width: min(240px, 100%);
+}
+
+.playtest-card-actions .small-button {
+  min-height: 38px;
+  padding: 8px 12px;
+}
+
+.playtest-pile-shell,
+.playtest-hand-shell,
+.playtest-side-zones,
+.playtest-shield-strip,
+.playtest-mana-zone-shell {
+  background: rgba(255, 255, 255, 0.018);
+}
+
+.playtest-deck-stack-top {
+  background:
+    radial-gradient(circle at top, rgba(123, 214, 255, 0.22), transparent 38%),
+    linear-gradient(145deg, rgba(20, 45, 72, 0.96), rgba(8, 13, 21, 0.98));
 }
 
 .playtest-side-button {
-  border-color: rgba(255, 166, 94, 0.8);
-  background: linear-gradient(180deg, rgba(255, 160, 81, 0.98), rgba(211, 101, 40, 0.98));
-  box-shadow: 0 0 14px rgba(255, 119, 53, 0.18);
+  border-color: rgba(126, 177, 255, 0.55);
+  background: linear-gradient(180deg, rgba(65, 117, 214, 0.98), rgba(27, 72, 146, 0.98));
+  box-shadow: 0 0 16px rgba(63, 127, 226, 0.18);
 }
 
 .playtest-side-button-primary {
-  border-color: rgba(127, 152, 255, 0.84);
-  background: linear-gradient(180deg, rgba(86, 116, 255, 0.98), rgba(66, 80, 204, 0.98));
-  box-shadow: 0 0 18px rgba(86, 116, 255, 0.28);
+  border-color: rgba(131, 235, 255, 0.7);
+  background: linear-gradient(180deg, rgba(97, 193, 255, 0.98), rgba(47, 103, 192, 0.98));
+  box-shadow: 0 0 18px rgba(77, 161, 255, 0.24);
 }
 
 .playtest-turn-panel {
   border-radius: 16px;
   background: rgba(255, 255, 255, 0.03);
-}
-
-.deck-history-list {
-  display: grid;
-  gap: 12px;
-}
-
-.deck-history-item {
-  padding: 14px 16px;
-  border-radius: 18px;
-  border: 1px solid rgba(157, 213, 255, 0.14);
-  background:
-    linear-gradient(145deg, rgba(255, 255, 255, 0.08), transparent 36%),
-    rgba(255, 255, 255, 0.035);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
-}
-
-.deck-history-topline,
-.deck-history-meta {
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
-  flex-wrap: wrap;
-}
-
-.deck-history-topline span,
-.deck-history-meta span {
-  color: var(--muted);
-  font-size: 0.86rem;
-}
-
-.deck-history-note {
-  margin: 8px 0 10px;
-  color: #f4fbff;
-  font-weight: 600;
-}
-
-.deck-history-symbol {
-  width: 28px;
-  height: 28px;
-  border-radius: 999px;
-  display: inline-grid;
-  place-items: center;
-  font-size: 1rem;
-  line-height: 1;
-}
-
-.deck-history-symbol.is-added {
-  color: #dfffee;
-  background: rgba(71, 176, 118, 0.22);
-  border: 1px solid rgba(112, 227, 154, 0.34);
-}
-
-.deck-history-symbol.is-removed {
-  color: #ffe8ea;
-  background: rgba(162, 49, 63, 0.22);
-  border: 1px solid rgba(255, 132, 146, 0.34);
-}
-
-.view-toggle {
-  display: inline-flex;
-  gap: 8px;
-}
-
-.view-toggle-button.is-active {
-  color: #071018;
-  background: linear-gradient(135deg, var(--accent-strong), var(--accent));
-  border-color: transparent;
 }
 
 .workspace-grid {

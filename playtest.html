@@ -11,77 +11,9 @@
 </head>
 <body data-page="playtest">
   <div class="page-shell">
-    <nav class="panel top-nav" aria-label="Primary">
-      <a class="menu-logo-link" href="/" aria-label="Paladin's Vault home">
-        <img class="menu-logo menu-logo-full" src="./assets/crystal-vault-logo.png" alt="Paladin's Vault logo">
-      </a>
-      <div class="top-nav-links">
-        <a class="nav-link" data-route-link="builder" href="/builder">Deck Builder</a>
-        <details class="nav-dropdown nav-explore-dropdown">
-          <summary class="nav-link" data-route-link="explore">Explore</summary>
-          <div class="nav-dropdown-menu explore-dropdown-menu">
-            <a class="nav-link nav-dropdown-link" href="/explore-decks?type=decks">Decks</a>
-            <a class="nav-link nav-dropdown-link" href="/explore-decks?type=users">Users</a>
-            <a class="nav-link nav-dropdown-link" href="/cards">Cards</a>
-          </div>
-        </details>
-        <a class="nav-link nav-login-link" data-login-nav href="#">Login</a>
-        <a class="nav-link" data-signup-nav href="#">Sign Up</a>
-        <details class="nav-dropdown nav-avatar-dropdown" data-profile-menu hidden>
-          <summary class="nav-avatar-trigger" aria-label="Open profile menu">
-            <span class="nav-avatar" data-nav-avatar>PV</span>
-          </summary>
-          <div class="nav-dropdown-menu profile-dropdown-menu">
-            <a class="nav-link nav-dropdown-link" href="/profile">Profile Settings</a>
-            <a class="nav-link nav-dropdown-link" href="/profile#my-decks">My Decks</a>
-            <a class="nav-link nav-dropdown-link" href="/profile">My Profile</a>
-          </div>
-        </details>
-        <a class="nav-link nav-link-danger nav-logout-link" data-logout-nav href="#">Logout</a>
-      </div>
-    </nav>
-
     <main class="page-stack">
-      <section id="playtest-cover-panel" class="panel playtest-cover-panel">
-        <div class="playtest-cover-overlay">
-          <div class="playtest-cover-topline">
-            <span id="playtest-owner-label" class="playtest-owner-label">Paladin's Vault</span>
-            <a class="ghost-button playtest-back-link" href="/builder/editor">Back to Builder</a>
-          </div>
-          <h1 id="playtest-title">Playtest Sandbox</h1>
-          <p id="playtest-subtitle" class="hero-text">Load a deck from the builder to start drawing, charging mana, and goldfishing lines.</p>
-          <div class="playtest-cover-meta">
-            <span class="playtest-meta-pill">Shields <strong id="playtest-shield-count">0</strong></span>
-            <span class="playtest-meta-pill">Hand <strong id="playtest-hand-count">0</strong></span>
-            <span class="playtest-meta-pill">Battlefield <strong id="playtest-battle-count">0</strong></span>
-            <span class="playtest-meta-pill">Mana <strong id="playtest-mana-count">0</strong></span>
-            <span class="playtest-meta-pill">Library <strong id="playtest-draw-count">0</strong></span>
-            <span class="playtest-meta-pill">Graveyard <strong id="playtest-grave-count">0</strong></span>
-          </div>
-          <p class="hero-text" data-status></p>
-        </div>
-      </section>
-
-      <section class="playtest-stage-banner" aria-hidden="true">
-        <div class="playtest-stage-banner-inner"></div>
-      </section>
-
-      <section class="panel playtest-command-panel">
-        <div class="playtest-command-tabs">
-          <span class="playtest-command-tab">Deck</span>
-          <span class="playtest-command-tab is-active">Playtest</span>
-          <span class="playtest-command-tab">History</span>
-          <span class="playtest-command-tab">Sandbox</span>
-        </div>
-        <div class="playtest-command-search">
-          <div class="playtest-search-shell">
-            <input id="playtest-search-input" type="search" placeholder="Search cards in this deck">
-            <div id="playtest-search-results" class="playtest-search-results" hidden></div>
-          </div>
-        </div>
-      </section>
-
-      <section class="panel playtest-board-panel">
+      <section class="panel playtest-board-panel playtest-board-panel-clean">
+        <p class="hero-text playtest-inline-status" data-status></p>
         <div id="playtest-empty" class="playtest-empty-state" hidden>
           <p class="hero-text">Open a deck from the builder, then press <strong>Playtest</strong> to send it into the sandbox.</p>
         </div>
@@ -89,7 +21,6 @@
         <div id="playtest-board" class="playtest-table">
           <section class="playtest-battlefield-shell">
             <div class="playtest-battlefield-header">
-              <strong>Battlefield</strong>
               <span class="playtest-battlefield-meta">Turn <strong id="playtest-turn-value">1</strong></span>
             </div>
 
@@ -161,26 +92,6 @@
         </div>
       </section>
     </main>
-
-    <footer class="panel legal-footer">
-      <div class="legal-footer-top">
-        <a class="ghost-button legal-back-to-top" href="#top">Back to Top</a>
-      </div>
-      <div class="legal-footer-copy">
-        <p>Duel Masters, Kaijudo, related card names, card frames, artwork, and associated marks are trademarks and intellectual property of their respective rights holders, including Wizards of the Coast LLC and other licensors. All rights remain with their respective owners.</p>
-        <p>Paladin's Vault is an unofficial fan-made deckbuilding and collection website. It is not affiliated with, endorsed, sponsored, or specifically approved by Wizards of the Coast LLC, Hasbro, Takara Tomy, Shogakukan, or any other Duel Masters rights holder.</p>
-        <p>Paladin's Vault is intended to operate as non-official fan content. Users are responsible for how they use exported decklists, proxy sheets, and printed materials, and should make sure their use complies with the policies and laws that apply to them.</p>
-      </div>
-      <div class="legal-footer-bottom">
-        <p class="legal-footer-meta">© 2026 Paladin's Vault</p>
-        <div class="legal-footer-links">
-          <a href="/terms">Terms of Service</a>
-          <a href="/privacy">Privacy Policy</a>
-          <a href="/fan-policy">Fan Content &amp; IP Policy</a>
-          <a href="/contact">Contact</a>
-        </div>
-      </div>
-    </footer>
   </div>
 
   <div id="auth-modal" class="modal-shell" hidden>
