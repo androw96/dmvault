@@ -1320,9 +1320,21 @@ textarea:focus {
 
 .view-panel-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(180px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
   gap: 12px;
-  align-items: end;
+  align-items: stretch;
+}
+
+.view-panel-grid > .field,
+.view-panel-grid > button {
+  min-width: 0;
+}
+
+.view-panel-grid > button {
+  width: 100%;
+  min-height: 86px;
+  align-self: stretch;
+  justify-content: center;
 }
 
 .deck-builder-toolbar {
@@ -1348,6 +1360,7 @@ textarea:focus {
 .deck-search-field,
 .builder-filter-field,
 .builder-cost-field {
+  position: relative;
   gap: 10px;
   padding: 14px 16px;
   border-radius: 20px;
@@ -1372,6 +1385,49 @@ textarea:focus {
 .builder-cost-field input[type="range"] {
   width: 100%;
   accent-color: #81d7ff;
+}
+
+.search-suggestions {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(100% - 10px);
+  z-index: 14;
+  display: grid;
+  gap: 6px;
+  padding: 10px;
+  border-radius: 18px;
+  border: 1px solid rgba(157, 213, 255, 0.18);
+  background:
+    linear-gradient(145deg, rgba(18, 28, 40, 0.98), rgba(8, 13, 22, 0.98));
+  box-shadow: 0 22px 40px rgba(5, 10, 18, 0.3);
+}
+
+.search-suggestion-item {
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  border: 1px solid rgba(157, 213, 255, 0.1);
+  background: rgba(255, 255, 255, 0.035);
+  color: #f7fcff;
+  text-align: left;
+}
+
+.search-suggestion-item:hover,
+.search-suggestion-item:focus-visible {
+  border-color: rgba(157, 213, 255, 0.28);
+  background: rgba(129, 215, 255, 0.08);
+}
+
+.search-suggestion-name {
+  font-weight: 700;
+  line-height: 1.15;
+}
+
+.search-suggestion-meta {
+  color: var(--muted);
+  font-size: 0.82rem;
 }
 
 .deck-title-field {
@@ -1593,78 +1649,114 @@ textarea:focus {
   justify-content: flex-end;
 }
 
-.playtest-control-bar {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
-  align-items: center;
-  margin-top: 18px;
+.playtest-table {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 150px;
+  gap: 16px;
 }
 
-.playtest-turn-control {
-  margin-left: auto;
-  display: inline-flex;
-  align-items: center;
+.playtest-battlefield-shell {
+  display: grid;
   gap: 10px;
-  padding: 10px 14px;
-  border-radius: 999px;
-  border: 1px solid rgba(157, 213, 255, 0.18);
-  background: rgba(255, 255, 255, 0.04);
 }
 
-.playtest-turn-control span {
-  color: #dcecff;
-  text-transform: uppercase;
-  letter-spacing: 0.12em;
-  font-size: 0.72rem;
+.playtest-battlefield-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  color: #f7fcff;
   font-weight: 700;
 }
 
-.playtest-turn-control strong {
-  min-width: 1.5rem;
-  text-align: center;
-  font-size: 1.1rem;
+.playtest-battlefield-header strong {
+  font-size: 1rem;
 }
 
-.playtest-stat-cards {
-  margin-top: 18px;
+.playtest-battlefield-header span {
+  color: var(--muted);
+  font-size: 0.9rem;
 }
 
-.playtest-board {
+.playtest-battlefield {
+  position: relative;
+  min-height: 62vh;
   display: grid;
+  grid-template-rows: auto 1fr auto;
   gap: 18px;
-}
-
-.playtest-zone {
-  padding: 18px;
+  padding: 16px;
   border-radius: 24px;
-  border: 1px solid rgba(157, 213, 255, 0.14);
-  background:
-    linear-gradient(145deg, rgba(255, 255, 255, 0.08), transparent 36%),
-    rgba(255, 255, 255, 0.035);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: linear-gradient(180deg, rgba(38, 40, 44, 0.92), rgba(28, 29, 32, 0.96));
+  overflow: hidden;
 }
 
-.playtest-zone-header {
+.playtest-battlefield-grid {
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.026) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.026) 1px, transparent 1px);
+  background-size: 20px 20px;
+  pointer-events: none;
+}
+
+.playtest-shield-strip,
+.playtest-battle-zone-shell,
+.playtest-mana-zone-shell,
+.playtest-bottom-rail,
+.playtest-hand-shell,
+.playtest-side-zones,
+.playtest-pile-shell {
+  position: relative;
+  z-index: 1;
+}
+
+.playtest-inline-zone-header {
   display: flex;
   justify-content: space-between;
-  gap: 12px;
-  align-items: start;
-  margin-bottom: 14px;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+  color: #f7fcff;
 }
 
-.playtest-zone-header h2 {
-  margin: 2px 0 0;
+.playtest-inline-zone-header span {
+  font-size: 0.92rem;
+  font-weight: 700;
+}
+
+.playtest-inline-zone-header strong {
+  color: #dcecff;
+  font-size: 0.95rem;
 }
 
 .playtest-card-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
   gap: 14px;
 }
 
-.playtest-card-grid-shields {
-  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+.playtest-card-grid-battle {
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+}
+
+.playtest-inline-card-row {
+  display: flex;
+  gap: 12px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+}
+
+.playtest-inline-card-row > * {
+  flex: 0 0 auto;
+}
+
+.playtest-inline-card-row-hand > * {
+  width: 215px;
+}
+
+.playtest-inline-card-row-shields > * {
+  width: 168px;
 }
 
 .playtest-card {
@@ -1748,9 +1840,9 @@ textarea:focus {
 
 .playtest-pile-stack {
   position: relative;
-  width: min(240px, 100%);
+  width: min(170px, 100%);
   aspect-ratio: 63 / 88;
-  margin: 0 auto;
+  margin: 0;
 }
 
 .playtest-deck-stack-card,
@@ -1790,7 +1882,7 @@ textarea:focus {
   display: grid;
   gap: 4px;
   margin-top: 12px;
-  text-align: center;
+  text-align: left;
 }
 
 .playtest-pile-meta span {
@@ -1804,6 +1896,84 @@ textarea:focus {
 
 .playtest-zone-empty {
   margin: 0;
+}
+
+.playtest-sidebar {
+  display: grid;
+  align-content: start;
+  gap: 10px;
+}
+
+.playtest-side-button {
+  width: 100%;
+  min-height: 48px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 173, 96, 0.55);
+  background: linear-gradient(180deg, rgba(248, 164, 90, 0.95), rgba(201, 97, 42, 0.95));
+  color: #fffaf4;
+  font-weight: 700;
+  box-shadow: 0 0 18px rgba(240, 122, 52, 0.2);
+}
+
+.playtest-side-button-primary {
+  border-color: rgba(255, 205, 132, 0.75);
+  background: linear-gradient(180deg, rgba(255, 189, 94, 1), rgba(219, 111, 45, 0.98));
+}
+
+.playtest-turn-panel {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border-radius: 20px;
+  border: 1px solid rgba(129, 215, 255, 0.18);
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.playtest-turn-panel span {
+  color: #dcecff;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-align: center;
+}
+
+.playtest-turn-actions {
+  display: grid;
+  gap: 8px;
+}
+
+.playtest-bottom-rail {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 360px;
+  gap: 14px;
+  align-items: start;
+  margin-top: 8px;
+}
+
+.playtest-hand-shell,
+.playtest-side-zones {
+  min-height: 182px;
+  padding: 14px;
+  border-radius: 20px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(27, 28, 31, 0.88);
+}
+
+.playtest-side-zones {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.playtest-mini-zone {
+  min-height: 238px;
+  padding: 10px;
+  border-radius: 16px;
+  border: 1px solid rgba(157, 213, 255, 0.12);
+  background: rgba(9, 14, 22, 0.65);
+  display: grid;
+  gap: 10px;
 }
 
 .deck-history-list {
@@ -3223,15 +3393,29 @@ input[type="range"] {
     font-size: clamp(1.9rem, 8vw, 2.8rem);
   }
 
-  .playtest-control-bar {
-    display: grid;
+  .playtest-table {
+    grid-template-columns: 1fr;
+  }
+
+  .playtest-sidebar {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    align-content: stretch;
+  }
+
+  .playtest-turn-panel {
+    grid-column: 1 / -1;
+  }
+
+  .playtest-bottom-rail {
+    grid-template-columns: 1fr;
+  }
+
+  .playtest-side-zones {
     grid-template-columns: 1fr 1fr;
   }
 
-  .playtest-turn-control {
-    margin-left: 0;
-    justify-content: center;
-    grid-column: 1 / -1;
+  .playtest-battlefield {
+    min-height: 48vh;
   }
 
   .playtest-card-grid {
@@ -3289,7 +3473,11 @@ input[type="range"] {
     height: 50px;
   }
 
-  .playtest-control-bar {
+  .playtest-sidebar {
+    grid-template-columns: 1fr;
+  }
+
+  .playtest-side-zones {
     grid-template-columns: 1fr;
   }
 

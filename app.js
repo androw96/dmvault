@@ -152,6 +152,7 @@ const elements = {
   deckVisibilitySelect: document.querySelector("#deck-visibility-select"),
   builderSortSelect: document.querySelector("#builder-sort"),
   searchInput: document.querySelector("#search-input"),
+  searchSuggestions: document.querySelector("#search-suggestions"),
   civilizationFilter: document.querySelector("#civilization-filter"),
   typeFilter: document.querySelector("#type-filter"),
   costFilter: document.querySelector("#cost-filter"),
@@ -1061,8 +1062,49 @@ function scheduleCardSearch(limit = null) {
   }
   state.cardSearchDebounce = window.setTimeout(async () => {
     await loadCards(limit ?? (isDeckEditorPage ? 60 : 160));
+    renderSearchSuggestions();
     renderCards();
   }, 180);
+}
+
+function renderSearchSuggestions() {
+  if (!elements.searchSuggestions) {
+    return;
+  }
+  const container = elements.searchSuggestions;
+  container.replaceChildren();
+  const query = (state.filters.search || "").trim();
+  if (!isDeckEditorPage || !query) {
+    container.hidden = true;
+    return;
+  }
+  const suggestions = state.cards.filter((card) => card?.name).slice(0, 8);
+  if (!suggestions.length) {
+    container.hidden = true;
+    return;
+  }
+  for (const card of suggestions) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "search-suggestion-item";
+    button.innerHTML = `
+      <span class="search-suggestion-name">${escapeHtml(card.name)}</span>
+      <span class="search-suggestion-meta">${escapeHtml(`${card.cost} mana • ${card.type}`)}</span>
+    `;
+    button.addEventListener("click", () => {
+      state.filters.search = card.name;
+      if (elements.searchInput) {
+        elements.searchInput.value = card.name;
+      }
+      container.hidden = true;
+      void loadCards(48).then(() => {
+        renderSearchSuggestions();
+        renderCards();
+      });
+    });
+    container.append(button);
+  }
+  container.hidden = false;
 }
 
 function ensureNotificationMenu() {
@@ -1314,6 +1356,14 @@ function bindEvents() {
   elements.searchInput?.addEventListener("input", (event) => {
     state.filters.search = event.target.value.trim();
     scheduleCardSearch(isDeckEditorPage ? 48 : 120);
+  });
+  elements.searchInput?.addEventListener("focus", () => {
+    renderSearchSuggestions();
+  });
+  elements.searchInput?.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && elements.searchSuggestions) {
+      elements.searchSuggestions.hidden = true;
+    }
   });
 
   elements.civilizationFilter?.addEventListener("change", (event) => {
@@ -3381,6 +3431,13 @@ function positionDropdownMenu(summary, menu, alignRight = false) {
 }
 
 function handleDocumentClick(event) {
+  if (
+    elements.searchSuggestions
+    && !elements.searchSuggestions.contains(event.target)
+    && !elements.searchInput?.contains(event.target)
+  ) {
+    elements.searchSuggestions.hidden = true;
+  }
   for (const dropdown of elements.navDropdowns) {
     const menu = getDropdownMenu(dropdown);
     const summary = dropdown.querySelector("summary");
@@ -4000,6 +4057,7 @@ function renderCards() {
     return;
   }
   elements.catalogGrid.replaceChildren();
+  renderSearchSuggestions();
 
   if (isDeckEditorPage && !state.filters.search) {
     const empty = document.createElement("p");

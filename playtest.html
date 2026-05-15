@@ -53,30 +53,6 @@
             <a class="ghost-button" href="/builder/editor">Back to Builder</a>
           </div>
         </div>
-
-        <div class="playtest-control-bar">
-          <button id="playtest-setup-button" type="button" class="primary-button">Setup Opening Hand</button>
-          <button id="playtest-draw-button" type="button" class="small-button">Draw 1</button>
-          <button id="playtest-mulligan-button" type="button" class="small-button ghost-button">Mulligan</button>
-          <button id="playtest-shuffle-button" type="button" class="small-button ghost-button">Shuffle Deck</button>
-          <button id="playtest-reset-button" type="button" class="small-button danger-button">Reset Sandbox</button>
-          <div class="playtest-turn-control">
-            <span>Turn</span>
-            <button id="playtest-turn-dec" type="button" class="small-button ghost-button">-</button>
-            <strong id="playtest-turn-value">1</strong>
-            <button id="playtest-turn-inc" type="button" class="small-button ghost-button">+</button>
-          </div>
-        </div>
-
-        <div class="builder-stat-cards playtest-stat-cards">
-          <div class="stat-card"><span>Draw Pile</span><strong id="playtest-draw-count">0</strong></div>
-          <div class="stat-card"><span>Shields</span><strong id="playtest-shield-count">0</strong></div>
-          <div class="stat-card"><span>Hand</span><strong id="playtest-hand-count">0</strong></div>
-          <div class="stat-card"><span>Battle Zone</span><strong id="playtest-battle-count">0</strong></div>
-          <div class="stat-card"><span>Mana Zone</span><strong id="playtest-mana-count">0</strong></div>
-          <div class="stat-card"><span>Graveyard</span><strong id="playtest-grave-count">0</strong></div>
-        </div>
-
         <p class="hero-text" data-status></p>
       </section>
 
@@ -85,65 +61,83 @@
           <p class="hero-text">Open a deck from the builder, then press <strong>Playtest</strong> to send it into the sandbox.</p>
         </div>
 
-        <div id="playtest-board" class="playtest-board">
-          <section class="playtest-zone playtest-zone-draw">
-            <div class="playtest-zone-header">
-              <div>
-                <p class="section-label">Deck</p>
-                <h2>Draw Pile</h2>
-              </div>
+        <div id="playtest-board" class="playtest-table">
+          <section class="playtest-battlefield-shell">
+            <div class="playtest-battlefield-header">
+              <strong>Battlefield</strong>
+              <span id="playtest-battlefield-meta">Turn <strong id="playtest-turn-value">1</strong></span>
             </div>
-            <div id="playtest-draw-pile-zone" class="playtest-pile-stack"></div>
+
+            <div class="playtest-battlefield">
+              <div class="playtest-battlefield-grid"></div>
+
+              <section class="playtest-shield-strip">
+                <div class="playtest-inline-zone-header">
+                  <span>Shields</span>
+                  <strong id="playtest-shield-count">0</strong>
+                </div>
+                <div id="playtest-shields-zone" class="playtest-inline-card-row playtest-inline-card-row-shields"></div>
+              </section>
+
+              <section class="playtest-battle-zone-shell">
+                <div class="playtest-inline-zone-header">
+                  <span>Battle Zone</span>
+                  <strong id="playtest-battle-count">0</strong>
+                </div>
+                <div id="playtest-battle-zone" class="playtest-card-grid playtest-card-grid-battle"></div>
+              </section>
+
+              <section class="playtest-mana-zone-shell">
+                <div class="playtest-inline-zone-header">
+                  <span>Mana Zone</span>
+                  <strong id="playtest-mana-count">0</strong>
+                </div>
+                <div id="playtest-mana-zone" class="playtest-inline-card-row"></div>
+              </section>
+            </div>
           </section>
 
-          <section class="playtest-zone playtest-zone-shields">
-            <div class="playtest-zone-header">
-              <div>
-                <p class="section-label">Defense</p>
-                <h2>Shields</h2>
+          <aside class="playtest-sidebar">
+            <button id="playtest-setup-button" type="button" class="playtest-side-button playtest-side-button-primary">Setup Hand</button>
+            <button id="playtest-mulligan-button" type="button" class="playtest-side-button">Mulligan</button>
+            <button id="playtest-reset-button" type="button" class="playtest-side-button">Restart</button>
+            <button id="playtest-shuffle-button" type="button" class="playtest-side-button">Shuffle</button>
+            <button id="playtest-draw-button" type="button" class="playtest-side-button">Draw</button>
+            <div class="playtest-turn-panel">
+              <span>Turn</span>
+              <div class="playtest-turn-actions">
+                <button id="playtest-turn-dec" type="button" class="small-button ghost-button">-</button>
+                <button id="playtest-turn-inc" type="button" class="small-button primary-button">Next Turn</button>
               </div>
             </div>
-            <div id="playtest-shields-zone" class="playtest-card-grid playtest-card-grid-shields"></div>
-          </section>
+          </aside>
 
-          <section class="playtest-zone playtest-zone-hand">
-            <div class="playtest-zone-header">
-              <div>
-                <p class="section-label">Options</p>
-                <h2>Hand</h2>
+          <section class="playtest-bottom-rail">
+            <div class="playtest-hand-shell">
+              <div class="playtest-inline-zone-header">
+                <span>Hand</span>
+                <strong id="playtest-hand-count">0</strong>
               </div>
+              <div id="playtest-hand-zone" class="playtest-inline-card-row playtest-inline-card-row-hand"></div>
             </div>
-            <div id="playtest-hand-zone" class="playtest-card-grid"></div>
-          </section>
 
-          <section class="playtest-zone playtest-zone-battle">
-            <div class="playtest-zone-header">
-              <div>
-                <p class="section-label">Board</p>
-                <h2>Battle Zone</h2>
-              </div>
-            </div>
-            <div id="playtest-battle-zone" class="playtest-card-grid"></div>
-          </section>
+            <div class="playtest-side-zones">
+              <section class="playtest-pile-shell">
+                <div class="playtest-inline-zone-header">
+                  <span>Library</span>
+                  <strong id="playtest-draw-count">0</strong>
+                </div>
+                <div id="playtest-draw-pile-zone" class="playtest-pile-stack"></div>
+              </section>
 
-          <section class="playtest-zone playtest-zone-mana">
-            <div class="playtest-zone-header">
-              <div>
-                <p class="section-label">Resources</p>
-                <h2>Mana Zone</h2>
-              </div>
+              <section class="playtest-pile-shell">
+                <div class="playtest-inline-zone-header">
+                  <span>Graveyard</span>
+                  <strong id="playtest-grave-count">0</strong>
+                </div>
+                <div id="playtest-graveyard-zone" class="playtest-mini-zone"></div>
+              </section>
             </div>
-            <div id="playtest-mana-zone" class="playtest-card-grid"></div>
-          </section>
-
-          <section class="playtest-zone playtest-zone-grave">
-            <div class="playtest-zone-header">
-              <div>
-                <p class="section-label">Spent Cards</p>
-                <h2>Graveyard</h2>
-              </div>
-            </div>
-            <div id="playtest-graveyard-zone" class="playtest-card-grid"></div>
           </section>
         </div>
       </section>
