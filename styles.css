@@ -2601,8 +2601,8 @@ body[data-page="playtest"] .page-stack {
 
 .builder-bottom-grid {
   display: grid;
-  grid-template-columns: 320px minmax(0, 1fr);
-  gap: 18px;
+  grid-template-columns: 1fr;
+  gap: 12px;
 }
 
 .text-import-grid {
@@ -2635,6 +2635,65 @@ input[type="range"] {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
   gap: 16px;
+}
+
+.selected-search-card {
+  display: grid;
+  grid-template-columns: 126px minmax(0, 1fr);
+  gap: 14px;
+  padding: 14px;
+  border-radius: 20px;
+  border: 1px solid rgba(157, 213, 255, 0.14);
+  background:
+    linear-gradient(145deg, rgba(255, 255, 255, 0.07), transparent 36%),
+    linear-gradient(180deg, rgba(14, 36, 60, 0.68), rgba(9, 15, 25, 0.88));
+}
+
+.selected-search-card-art {
+  width: 126px;
+  aspect-ratio: 63 / 88;
+  border-radius: 16px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.04);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+}
+
+.selected-search-card-art img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+}
+
+.selected-search-card-copy {
+  display: grid;
+  gap: 8px;
+  align-content: start;
+}
+
+.selected-search-card-copy strong {
+  font-size: 1.05rem;
+  letter-spacing: 0.02em;
+  color: #f6fbff;
+}
+
+.selected-search-card-copy span {
+  color: #d6e8fb;
+  font-size: 0.85rem;
+}
+
+.selected-search-card-copy p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.5;
+  font-size: 0.92rem;
+}
+
+.selected-search-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 4px;
 }
 
 .card-item {
@@ -3076,23 +3135,33 @@ input[type="range"] {
 }
 
 .chip {
-  padding: 8px 12px;
+  padding: 5px 9px;
   border-radius: 999px;
   background: rgba(111, 212, 255, 0.08);
   border: 1px solid rgba(111, 212, 255, 0.14);
+  font-size: 0.74rem;
+  line-height: 1.1;
 }
 
 .mana-curve {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(44px, 1fr));
-  gap: 8px;
+  grid-template-columns: repeat(auto-fit, minmax(34px, 1fr));
+  gap: 6px;
   align-items: end;
+  width: 100%;
+  overflow: hidden;
 }
 
 .curve-bar {
   display: grid;
-  gap: 8px;
+  gap: 6px;
   justify-items: center;
+  min-width: 0;
+}
+
+.curve-bar small {
+  font-size: 0.68rem;
+  color: #d7e9fb;
 }
 
 .curve-bar-fill {
@@ -3100,6 +3169,14 @@ input[type="range"] {
   min-height: 8px;
   border-radius: 10px 10px 4px 4px;
   background: linear-gradient(180deg, var(--accent), var(--violet));
+}
+
+.builder-stats-panel #civilization-breakdown {
+  gap: 6px;
+}
+
+.builder-stats-panel .summary-card {
+  overflow: hidden;
 }
 
 .print-pages {
@@ -3245,6 +3322,14 @@ input[type="range"] {
   .deck-builder-toolbar,
   .builder-board {
     grid-template-columns: 1fr;
+  }
+
+  .selected-search-card {
+    grid-template-columns: 1fr;
+  }
+
+  .selected-search-card-art {
+    width: min(180px, 100%);
   }
 
   .workspace-control-stack {

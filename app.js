@@ -105,6 +105,7 @@ const state = {
   deleteDeckTarget: null,
   deck: {},
   cardsLoaded: false,
+  selectedSearchCardId: null,
   cardSearchDebounce: null,
   cardsRequestId: 0,
   playtest: {
@@ -155,6 +156,7 @@ const elements = {
   builderSortSelect: document.querySelector("#builder-sort"),
   searchInput: document.querySelector("#search-input"),
   searchSuggestions: document.querySelector("#search-suggestions"),
+  selectedSearchCard: document.querySelector("#selected-search-card"),
   civilizationFilter: document.querySelector("#civilization-filter"),
   typeFilter: document.querySelector("#type-filter"),
   costFilter: document.querySelector("#cost-filter"),
@@ -1164,19 +1166,50 @@ function renderSearchSuggestions() {
       <span class="search-suggestion-meta">${escapeHtml(`${card.cost} mana • ${card.type}`)}</span>
     `;
     button.addEventListener("click", () => {
-      state.filters.search = card.name;
+      state.selectedSearchCardId = card.id;
+      state.filters.search = "";
       if (elements.searchInput) {
-        elements.searchInput.value = card.name;
+        elements.searchInput.value = "";
       }
       container.hidden = true;
-      void loadCards(48).then(() => {
-        renderSearchSuggestions();
-        renderCards();
-      });
+      state.cards = [];
+      renderSelectedSearchCard();
+      renderCards();
     });
     container.append(button);
   }
   container.hidden = false;
+}
+
+function renderSelectedSearchCard() {
+  if (!elements.selectedSearchCard) {
+    return;
+  }
+  const card = state.selectedSearchCardId ? state.cardIndex[String(state.selectedSearchCardId)] : null;
+  if (!card) {
+    elements.selectedSearchCard.hidden = true;
+    elements.selectedSearchCard.replaceChildren();
+    return;
+  }
+
+  const previewImage = card.image_path || card.illustration_path || "";
+  elements.selectedSearchCard.innerHTML = `
+    <div class="selected-search-card-art">
+      ${previewImage ? `<img src="${escapeHtml(previewImage)}" alt="${escapeHtml(card.name)}" loading="lazy" decoding="async">` : ""}
+    </div>
+    <div class="selected-search-card-copy">
+      <strong>${escapeHtml(card.name)}</strong>
+      <span>${escapeHtml(`${card.cost} mana • ${card.type} • ${card.civilizations.join(" / ")}`)}</span>
+      <p>${escapeHtml(card.text || "No rules text available.")}</p>
+      <div class="selected-search-card-actions">
+        <button type="button" class="primary-button" data-selected-add-card>Add to Deck</button>
+        <button type="button" class="ghost-button" data-selected-open-card>View Card</button>
+      </div>
+    </div>
+  `;
+  elements.selectedSearchCard.hidden = false;
+  elements.selectedSearchCard.querySelector("[data-selected-add-card]")?.addEventListener("click", () => addCardToDeck(card.id));
+  elements.selectedSearchCard.querySelector("[data-selected-open-card]")?.addEventListener("click", () => openCardDetail(card));
 }
 
 function ensureNotificationMenu() {
@@ -1427,6 +1460,10 @@ function bindEvents() {
 
   elements.searchInput?.addEventListener("input", (event) => {
     state.filters.search = event.target.value.trim();
+    if (state.filters.search) {
+      state.selectedSearchCardId = null;
+      renderSelectedSearchCard();
+    }
     scheduleCardSearch(isDeckEditorPage ? 48 : 120);
   });
   elements.searchInput?.addEventListener("focus", () => {
@@ -1604,6 +1641,7 @@ function syncBuilderViewControl() {
 
 function resetDeckEditorFilters() {
   state.filters.search = "";
+  state.selectedSearchCardId = null;
   state.filters.civilization = "all";
   state.filters.type = "all";
   state.filters.maxCost = state.filterDefaults.maxCost;
@@ -4147,6 +4185,7 @@ function renderCards() {
     return;
   }
   elements.catalogGrid.replaceChildren();
+  renderSelectedSearchCard();
   renderSearchSuggestions();
 
   if (isDeckEditorPage && !state.filters.search) {
