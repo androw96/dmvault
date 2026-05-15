@@ -42,18 +42,43 @@
     </nav>
 
     <main class="page-stack">
-      <section class="panel playtest-hero-panel">
-        <div class="panel-header playtest-hero-header">
-          <div>
-            <p class="section-label">Playtest Sandbox</p>
-            <h1 id="playtest-title">Playtest Sandbox</h1>
-            <p id="playtest-subtitle" class="hero-text">Load a deck from the builder to start drawing, charging mana, and goldfishing lines.</p>
+      <section id="playtest-cover-panel" class="panel playtest-cover-panel">
+        <div class="playtest-cover-overlay">
+          <div class="playtest-cover-topline">
+            <span id="playtest-owner-label" class="playtest-owner-label">Paladin's Vault</span>
+            <a class="ghost-button playtest-back-link" href="/builder/editor">Back to Builder</a>
           </div>
-          <div class="playtest-top-actions">
-            <a class="ghost-button" href="/builder/editor">Back to Builder</a>
+          <h1 id="playtest-title">Playtest Sandbox</h1>
+          <p id="playtest-subtitle" class="hero-text">Load a deck from the builder to start drawing, charging mana, and goldfishing lines.</p>
+          <div class="playtest-cover-meta">
+            <span class="playtest-meta-pill">Shields <strong id="playtest-shield-count">0</strong></span>
+            <span class="playtest-meta-pill">Hand <strong id="playtest-hand-count">0</strong></span>
+            <span class="playtest-meta-pill">Battlefield <strong id="playtest-battle-count">0</strong></span>
+            <span class="playtest-meta-pill">Mana <strong id="playtest-mana-count">0</strong></span>
+            <span class="playtest-meta-pill">Library <strong id="playtest-draw-count">0</strong></span>
+            <span class="playtest-meta-pill">Graveyard <strong id="playtest-grave-count">0</strong></span>
+          </div>
+          <p class="hero-text" data-status></p>
+        </div>
+      </section>
+
+      <section class="playtest-stage-banner" aria-hidden="true">
+        <div class="playtest-stage-banner-inner"></div>
+      </section>
+
+      <section class="panel playtest-command-panel">
+        <div class="playtest-command-tabs">
+          <span class="playtest-command-tab">Deck</span>
+          <span class="playtest-command-tab is-active">Playtest</span>
+          <span class="playtest-command-tab">History</span>
+          <span class="playtest-command-tab">Sandbox</span>
+        </div>
+        <div class="playtest-command-search">
+          <div class="playtest-search-shell">
+            <input id="playtest-search-input" type="search" placeholder="Search cards in this deck">
+            <div id="playtest-search-results" class="playtest-search-results" hidden></div>
           </div>
         </div>
-        <p class="hero-text" data-status></p>
       </section>
 
       <section class="panel playtest-board-panel">
@@ -65,7 +90,7 @@
           <section class="playtest-battlefield-shell">
             <div class="playtest-battlefield-header">
               <strong>Battlefield</strong>
-              <span id="playtest-battlefield-meta">Turn <strong id="playtest-turn-value">1</strong></span>
+              <span class="playtest-battlefield-meta">Turn <strong id="playtest-turn-value">1</strong></span>
             </div>
 
             <div class="playtest-battlefield">
@@ -74,7 +99,6 @@
               <section class="playtest-shield-strip">
                 <div class="playtest-inline-zone-header">
                   <span>Shields</span>
-                  <strong id="playtest-shield-count">0</strong>
                 </div>
                 <div id="playtest-shields-zone" class="playtest-inline-card-row playtest-inline-card-row-shields"></div>
               </section>
@@ -82,7 +106,6 @@
               <section class="playtest-battle-zone-shell">
                 <div class="playtest-inline-zone-header">
                   <span>Battle Zone</span>
-                  <strong id="playtest-battle-count">0</strong>
                 </div>
                 <div id="playtest-battle-zone" class="playtest-card-grid playtest-card-grid-battle"></div>
               </section>
@@ -90,7 +113,6 @@
               <section class="playtest-mana-zone-shell">
                 <div class="playtest-inline-zone-header">
                   <span>Mana Zone</span>
-                  <strong id="playtest-mana-count">0</strong>
                 </div>
                 <div id="playtest-mana-zone" class="playtest-inline-card-row"></div>
               </section>
@@ -98,7 +120,7 @@
           </section>
 
           <aside class="playtest-sidebar">
-            <button id="playtest-setup-button" type="button" class="playtest-side-button playtest-side-button-primary">Setup Hand</button>
+            <button id="playtest-setup-button" type="button" class="playtest-side-button">Setup Hand</button>
             <button id="playtest-mulligan-button" type="button" class="playtest-side-button">Mulligan</button>
             <button id="playtest-reset-button" type="button" class="playtest-side-button">Restart</button>
             <button id="playtest-shuffle-button" type="button" class="playtest-side-button">Shuffle</button>
@@ -107,7 +129,7 @@
               <span>Turn</span>
               <div class="playtest-turn-actions">
                 <button id="playtest-turn-dec" type="button" class="small-button ghost-button">-</button>
-                <button id="playtest-turn-inc" type="button" class="small-button primary-button">Next Turn</button>
+                <button id="playtest-turn-inc" type="button" class="playtest-side-button playtest-side-button-primary">Next Turn</button>
               </div>
             </div>
           </aside>
@@ -116,7 +138,6 @@
             <div class="playtest-hand-shell">
               <div class="playtest-inline-zone-header">
                 <span>Hand</span>
-                <strong id="playtest-hand-count">0</strong>
               </div>
               <div id="playtest-hand-zone" class="playtest-inline-card-row playtest-inline-card-row-hand"></div>
             </div>
@@ -125,7 +146,6 @@
               <section class="playtest-pile-shell">
                 <div class="playtest-inline-zone-header">
                   <span>Library</span>
-                  <strong id="playtest-draw-count">0</strong>
                 </div>
                 <div id="playtest-draw-pile-zone" class="playtest-pile-stack"></div>
               </section>
@@ -133,7 +153,6 @@
               <section class="playtest-pile-shell">
                 <div class="playtest-inline-zone-header">
                   <span>Graveyard</span>
-                  <strong id="playtest-grave-count">0</strong>
                 </div>
                 <div id="playtest-graveyard-zone" class="playtest-mini-zone"></div>
               </section>

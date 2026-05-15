@@ -105,81 +105,84 @@
           </div>
         </div>
 
-        <div class="deck-builder-toolbar">
-          <label class="field deck-search-field">
-            <span>Search Cards</span>
-            <input id="search-input" type="search" placeholder="Start typing a card name like Bolmeteus, Meloppe, Aqua Hulcus">
-            <div id="search-suggestions" class="search-suggestions" hidden></div>
-          </label>
-          <details class="view-panel deck-filter-dropdown">
-            <summary class="ghost-button view-panel-toggle">Filters</summary>
-            <div class="deck-filter-grid">
-              <label class="field builder-filter-field">
-                <span>Civilization</span>
-                <select id="civilization-filter"><option value="all">All</option></select>
-              </label>
-              <label class="field builder-filter-field">
-                <span>Type</span>
-                <select id="type-filter"><option value="all">All</option></select>
-              </label>
-              <label class="field builder-cost-field">
-                <span>Mana Up To <strong id="cost-filter-value">14</strong></span>
-                <input id="cost-filter" type="range" min="1" max="14" value="14">
-              </label>
-              <button id="reset-filters-button" class="small-button">Reset Filters</button>
-            </div>
-          </details>
-        </div>
-
         <p id="share-status" class="hero-text" data-status></p>
 
-        <div class="workspace-grid workspace-grid-single">
-          <div class="deck-column">
-            <div id="deck-list" class="deck-list"></div>
-          </div>
-        </div>
-      </section>
+        <div class="builder-board">
+          <div class="builder-main-column">
+            <section class="builder-surface builder-catalog-surface" data-builder-editor>
+              <div class="deck-builder-toolbar">
+                <label class="field deck-search-field">
+                  <span>Search Cards</span>
+                  <input id="search-input" type="search" placeholder="Start typing a card name like Bolmeteus, Meloppe, Aqua Hulcus">
+                  <div id="search-suggestions" class="search-suggestions" hidden></div>
+                </label>
+                <details class="view-panel deck-filter-dropdown">
+                  <summary class="ghost-button view-panel-toggle">Filters</summary>
+                  <div class="deck-filter-grid">
+                    <label class="field builder-filter-field">
+                      <span>Civilization</span>
+                      <select id="civilization-filter"><option value="all">All</option></select>
+                    </label>
+                    <label class="field builder-filter-field">
+                      <span>Type</span>
+                      <select id="type-filter"><option value="all">All</option></select>
+                    </label>
+                    <label class="field builder-cost-field">
+                      <span>Mana Up To <strong id="cost-filter-value">14</strong></span>
+                      <input id="cost-filter" type="range" min="1" max="14" value="14">
+                    </label>
+                    <button id="reset-filters-button" class="small-button">Reset Filters</button>
+                  </div>
+                </details>
+              </div>
+              <div id="catalog-grid" class="catalog-grid"></div>
+            </section>
 
-      <section class="panel quick-cards-panel" data-builder-editor>
-        <div id="catalog-grid" class="catalog-grid"></div>
-      </section>
-
-      <section class="panel builder-stats-panel" data-builder-stats hidden>
-        <div class="panel-header">
-          <div>
-            <p class="section-label">Deck Stats</p>
-            <h2>Breakdown and mana profile</h2>
+            <section class="builder-surface builder-deck-surface">
+              <div id="deck-list" class="deck-list"></div>
+            </section>
           </div>
-        </div>
 
-        <div class="builder-stat-cards">
-          <div class="stat-card"><span>Visible Cards</span><strong id="card-count">0</strong></div>
-          <div class="stat-card"><span>Deck Size</span><strong id="deck-count">0</strong></div>
-          <div class="stat-card"><span>Average Cost</span><strong id="average-cost">0.0</strong></div>
-        </div>
+          <aside class="builder-side-column">
+            <section class="builder-surface builder-stats-panel" data-builder-stats hidden>
+              <div class="builder-surface-header">
+                <div>
+                  <p class="section-label">Deck Stats</p>
+                  <h2>Breakdown and mana profile</h2>
+                </div>
+              </div>
 
-        <div class="builder-bottom-grid">
-          <div class="summary-card">
-            <p class="section-label">Civilizations</p>
-            <div id="civilization-breakdown" class="chip-row"></div>
-          </div>
-          <div class="summary-card">
-            <p class="section-label">Mana Curve</p>
-            <div id="mana-curve" class="mana-curve"></div>
-          </div>
-        </div>
-      </section>
+              <div class="builder-stat-cards">
+                <div class="stat-card"><span>Visible Cards</span><strong id="card-count">0</strong></div>
+                <div class="stat-card"><span>Deck Size</span><strong id="deck-count">0</strong></div>
+                <div class="stat-card"><span>Average Cost</span><strong id="average-cost">0.0</strong></div>
+              </div>
 
-      <section class="panel sandbox-launch-panel" data-builder-editor>
-        <div class="panel-header">
-          <div>
-            <p class="section-label">Sandbox Mode</p>
-            <h2>Test your lines without leaving the vault</h2>
-          </div>
-        </div>
-        <div class="sandbox-launch-copy">
-          <p class="hero-text">Open the playtest sandbox to draw hands, set shields, move cards across zones, and goldfish turns with the current deck.</p>
-          <button id="open-playtest-button" type="button" class="primary-button">Open Sandbox Mode</button>
+              <div class="builder-bottom-grid">
+                <div class="summary-card">
+                  <p class="section-label">Civilizations</p>
+                  <div id="civilization-breakdown" class="chip-row"></div>
+                </div>
+                <div class="summary-card">
+                  <p class="section-label">Mana Curve</p>
+                  <div id="mana-curve" class="mana-curve"></div>
+                </div>
+              </div>
+            </section>
+
+            <section class="builder-surface sandbox-launch-panel" data-builder-editor>
+              <div class="builder-surface-header">
+                <div>
+                  <p class="section-label">Sandbox Mode</p>
+                  <h2>Test your lines without leaving the vault</h2>
+                </div>
+              </div>
+              <div class="sandbox-launch-copy">
+                <p class="hero-text">Open the playtest sandbox to draw hands, set shields, move cards across zones, and goldfish turns with the current deck.</p>
+                <button id="open-playtest-button" type="button" class="primary-button">Open Sandbox Mode</button>
+              </div>
+            </section>
+          </aside>
         </div>
       </section>
     </main>

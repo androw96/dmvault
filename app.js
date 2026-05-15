@@ -109,6 +109,8 @@ const state = {
   cardsRequestId: 0,
   playtest: {
     title: "Playtest Sandbox",
+    coverImage: null,
+    ownerLabel: "Paladin's Vault",
     sourceCards: [],
     drawPile: [],
     hand: [],
@@ -300,6 +302,10 @@ const elements = {
   adminDeckList: document.querySelector("#admin-deck-list"),
   adminAuditLog: document.querySelector("#admin-audit-log"),
   adminContactInbox: document.querySelector("#admin-contact-inbox"),
+  playtestCoverPanel: document.querySelector("#playtest-cover-panel"),
+  playtestOwnerLabel: document.querySelector("#playtest-owner-label"),
+  playtestSearchInput: document.querySelector("#playtest-search-input"),
+  playtestSearchResults: document.querySelector("#playtest-search-results"),
   playtestTitle: document.querySelector("#playtest-title"),
   playtestSubtitle: document.querySelector("#playtest-subtitle"),
   playtestSetupButton: document.querySelector("#playtest-setup-button"),
@@ -500,9 +506,11 @@ function playtestZones() {
   return ["drawPile", "hand", "shields", "mana", "battle", "graveyard"];
 }
 
-function emptyPlaytestState(title = "Playtest Sandbox", sourceCards = []) {
+function emptyPlaytestState(title = "Playtest Sandbox", sourceCards = [], options = {}) {
   return {
     title,
+    coverImage: options.coverImage || null,
+    ownerLabel: options.ownerLabel || "Paladin's Vault",
     sourceCards,
     drawPile: [],
     hand: [],
@@ -531,6 +539,17 @@ function applyPlaytestState(nextState) {
 
 function buildPlaytestSourceCards() {
   return expandDeckCards().filter(Boolean).map((card) => ({ ...card }));
+}
+
+function playtestSourceCardChoices() {
+  const seen = new Set();
+  return (state.playtest.sourceCards || []).filter((card) => {
+    if (!card?.id || seen.has(card.id)) {
+      return false;
+    }
+    seen.add(card.id);
+    return true;
+  });
 }
 
 async function ensureDeckCardsHydratedForPlaytest() {
@@ -623,6 +642,41 @@ function drawPlaytestCards(count = 1) {
   state.playtest.ready = true;
   persistPlaytestState();
   renderPlaytestSandbox();
+}
+
+function renderPlaytestSearchResults() {
+  if (!elements.playtestSearchResults || !elements.playtestSearchInput) {
+    return;
+  }
+  const query = elements.playtestSearchInput.value.trim().toLowerCase();
+  const container = elements.playtestSearchResults;
+  container.replaceChildren();
+  if (!query) {
+    container.hidden = true;
+    return;
+  }
+  const matches = playtestSourceCardChoices()
+    .filter((card) => normalizeName(card.name).includes(normalizeName(query)))
+    .slice(0, 8);
+  if (!matches.length) {
+    container.hidden = true;
+    return;
+  }
+  for (const card of matches) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "playtest-search-result";
+    button.innerHTML = `
+      <strong>${escapeHtml(card.name)}</strong>
+      <span>${escapeHtml(`${card.cost} mana • ${card.type} • ${card.race_label}`)}</span>
+    `;
+    button.addEventListener("click", () => {
+      container.hidden = true;
+      openCardDetail(card);
+    });
+    container.append(button);
+  }
+  container.hidden = false;
 }
 
 function mulliganPlaytestHand() {
@@ -798,6 +852,13 @@ function renderPlaytestSandbox() {
     return;
   }
   const hasSource = (state.playtest.sourceCards || []).length > 0;
+  if (elements.playtestCoverPanel) {
+    const coverImage = resolveAssetUrl(state.playtest.coverImage || DEFAULT_LOGO_URL);
+    elements.playtestCoverPanel.style.setProperty("--playtest-cover-image", `url('${coverImage}')`);
+  }
+  if (elements.playtestOwnerLabel) {
+    elements.playtestOwnerLabel.textContent = state.playtest.ownerLabel || "Paladin's Vault";
+  }
   if (elements.playtestTitle) {
     elements.playtestTitle.textContent = state.playtest.title || "Playtest Sandbox";
   }
@@ -836,6 +897,7 @@ function renderPlaytestSandbox() {
   if (elements.playtestBattleCount) elements.playtestBattleCount.textContent = String(state.playtest.battle.length);
   if (elements.playtestManaCount) elements.playtestManaCount.textContent = String(state.playtest.mana.length);
   if (elements.playtestGraveCount) elements.playtestGraveCount.textContent = String(state.playtest.graveyard.length);
+  renderPlaytestSearchResults();
   if (!hasSource) {
     return;
   }
@@ -859,7 +921,14 @@ async function loadPlaytestSandbox() {
     if (deckId) {
       try {
         const deckPayload = await fetchJson(withViewer(`${API_BASE}/decks/${deckId}`));
-        payload = emptyPlaytestState(deckPayload.title, deckPayload.cards.map((entry) => entry.card));
+        payload = emptyPlaytestState(
+          deckPayload.title,
+          deckPayload.cards.map((entry) => entry.card),
+          {
+            coverImage: deckPayload.cover_image_url || deriveAutomaticDeckCover(),
+            ownerLabel: deckPayload.owner?.username ? displayUsername(deckPayload.owner.username) : "Paladin's Vault"
+          }
+        );
       } catch {
         payload = null;
       }
@@ -900,7 +969,10 @@ async function openPlaytestSandbox() {
     setStatus("The current deck is missing card data. Search once or reload the deck, then try again.", "error");
     return;
   }
-  applyPlaytestState(emptyPlaytestState(deckSnapshotTitle(), sourceCards));
+  applyPlaytestState(emptyPlaytestState(deckSnapshotTitle(), sourceCards, {
+    coverImage: state.deckCoverImageUrl || deriveAutomaticDeckCover(),
+    ownerLabel: displayUsername(activeProfile()?.username || state.loadedDeckOwner?.username || "Paladin's Vault")
+  }));
   setupPlaytestGame();
   const target = `${playtestPagePath()}${state.loadedShareId && window.location.protocol !== "file:" ? `?deck=${encodeURIComponent(state.loadedShareId)}` : ""}`;
   window.location.assign(target);
@@ -1385,6 +1457,17 @@ function bindEvents() {
   elements.playtestSetupButton?.addEventListener("click", () => {
     setupPlaytestGame();
     setStatus(`Playtest ready: ${state.playtest.title}`, "success");
+  });
+  elements.playtestSearchInput?.addEventListener("input", () => {
+    renderPlaytestSearchResults();
+  });
+  elements.playtestSearchInput?.addEventListener("focus", () => {
+    renderPlaytestSearchResults();
+  });
+  elements.playtestSearchInput?.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && elements.playtestSearchResults) {
+      elements.playtestSearchResults.hidden = true;
+    }
   });
   elements.playtestDrawButton?.addEventListener("click", () => drawPlaytestCards(1));
   elements.playtestMulliganButton?.addEventListener("click", mulliganPlaytestHand);
@@ -3431,6 +3514,13 @@ function positionDropdownMenu(summary, menu, alignRight = false) {
 }
 
 function handleDocumentClick(event) {
+  if (
+    elements.playtestSearchResults
+    && !elements.playtestSearchResults.contains(event.target)
+    && !elements.playtestSearchInput?.contains(event.target)
+  ) {
+    elements.playtestSearchResults.hidden = true;
+  }
   if (
     elements.searchSuggestions
     && !elements.searchSuggestions.contains(event.target)
