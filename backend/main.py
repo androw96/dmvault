@@ -663,6 +663,11 @@ def builder_editor_page() -> HTMLResponse:
     return render_page("deck-editor.html")
 
 
+@app.get("/builder/history", response_class=HTMLResponse)
+def builder_history_page() -> HTMLResponse:
+    return render_page("history.html")
+
+
 @app.get("/playtest", response_class=HTMLResponse)
 def playtest_page() -> HTMLResponse:
     return render_page("playtest.html")

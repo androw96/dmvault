@@ -48,6 +48,7 @@ const page = document.body.dataset.page ?? "welcome";
 const isBuilderLandingPage = page === "builder";
 const isDeckEditorPage = page === "deck-editor";
 const isCardDetailPage = page === "card-detail";
+const isHistoryPage = page === "history";
 const isPlaytestPage = page === "playtest";
 const isBuilderExperiencePage = isBuilderLandingPage || isDeckEditorPage;
 const hasPreloadedBuilderDeck = window.location.pathname.match(/^\/share\/[a-z0-9-]+$/i)
@@ -322,6 +323,8 @@ const elements = {
   playtestBattleZone: document.querySelector("#playtest-battle-zone"),
   playtestManaZone: document.querySelector("#playtest-mana-zone"),
   playtestGraveyardZone: document.querySelector("#playtest-graveyard-zone"),
+  historyPageTitle: document.querySelector("#history-page-title"),
+  historyPageSubtitle: document.querySelector("#history-page-subtitle"),
   adminMonthModal: null,
   adminMonthModalTitle: null,
   adminMonthModalLabel: null,
@@ -399,6 +402,9 @@ async function initialize() {
   if (isCardDetailPage) {
     await loadCardDetailPage();
   }
+  if (isHistoryPage) {
+    await loadHistoryPage();
+  }
   if (isPlaytestPage) {
     await loadPlaytestSandbox();
   }
@@ -423,6 +429,7 @@ async function initialize() {
   renderBuilder();
   renderCards();
   renderPrintPages();
+  renderDeckHistory();
   renderPlaytestSandbox();
   renderHeaderStats();
   renderAdminPage();
@@ -451,6 +458,10 @@ function openCardDetail(card) {
 
 function playtestPagePath() {
   return window.location.protocol === "file:" ? "./playtest.html" : "/playtest";
+}
+
+function historyPagePath() {
+  return window.location.protocol === "file:" ? "./history.html" : "/builder/history";
 }
 
 function resolveAssetUrl(path) {
@@ -858,6 +869,23 @@ async function loadPlaytestSandbox() {
     return;
   }
   applyPlaytestState(emptyPlaytestState());
+}
+
+async function loadHistoryPage() {
+  if (!state.loadedShareId) {
+    const deckId = new URLSearchParams(window.location.search).get("deck");
+    if (deckId && window.location.protocol !== "file:") {
+      try {
+        await loadDeckIntoWorkspace(deckId, { openBuilder: false });
+        return;
+      } catch {}
+    }
+  }
+  if (state.loadedShareId) {
+    try {
+      await loadDeckHistory(state.loadedShareId);
+    } catch {}
+  }
 }
 
 async function openPlaytestSandbox() {
@@ -1272,8 +1300,8 @@ function bindEvents() {
     renderBuilder();
   });
   elements.toggleHistoryButton?.addEventListener("click", () => {
-    state.historyOpen = !state.historyOpen;
-    renderBuilder();
+    const target = `${historyPagePath()}${state.loadedShareId && window.location.protocol !== "file:" ? `?deck=${encodeURIComponent(state.loadedShareId)}` : ""}`;
+    window.location.assign(target);
   });
   elements.deckWorkspaceTitle?.addEventListener("click", promptRenameDeckTitle);
   elements.deckWorkspaceTitle?.addEventListener("keydown", (event) => {
@@ -3490,7 +3518,7 @@ function renderBuilderEntry() {
 }
 
 async function maybeLoadBuilderDeckFromQuery() {
-  if (!isDeckEditorPage) {
+  if (!isDeckEditorPage && !isHistoryPage) {
     return;
   }
   const params = new URLSearchParams(window.location.search);
@@ -3848,11 +3876,7 @@ function renderBuilder() {
     elements.deckBackgroundField.hidden = showReadOnlyOwnerPanel;
   }
   if (elements.deckHistoryPanel) {
-    elements.deckHistoryPanel.hidden = !state.historyOpen;
-  }
-  if (elements.toggleHistoryButton) {
-    elements.toggleHistoryButton.textContent = state.historyOpen ? "Hide History" : "History";
-    elements.toggleHistoryButton.classList.toggle("is-active", state.historyOpen);
+    elements.deckHistoryPanel.hidden = true;
   }
   if (elements.deckOwnerPanel) {
     elements.deckOwnerPanel.hidden = !showReadOnlyOwnerPanel;
@@ -4154,6 +4178,14 @@ function renderDeckHistory() {
     return;
   }
   elements.deckHistoryList.replaceChildren();
+  if (elements.historyPageTitle) {
+    elements.historyPageTitle.textContent = `${deckSnapshotTitle()} History`;
+  }
+  if (elements.historyPageSubtitle) {
+    elements.historyPageSubtitle.textContent = state.loadedShareId
+      ? "Review the saved change log for this deck."
+      : "This working deck has not been saved yet, so there is no revision history to display.";
+  }
 
   if (!state.loadedShareId) {
     const empty = document.createElement("p");

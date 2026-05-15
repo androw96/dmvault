@@ -1320,7 +1320,7 @@ textarea:focus {
 
 .view-panel-grid {
   display: grid;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(180px, 1fr));
   gap: 12px;
   align-items: end;
 }
@@ -1328,9 +1328,21 @@ textarea:focus {
 .deck-builder-toolbar {
   margin: 18px 0 8px;
   display: grid;
-  grid-template-columns: minmax(320px, 1.7fr) repeat(2, minmax(150px, 0.8fr)) minmax(210px, 1fr) auto;
+  grid-template-columns: minmax(320px, 1.7fr) minmax(210px, 0.75fr);
   gap: 14px;
   align-items: stretch;
+}
+
+.deck-filter-dropdown {
+  min-width: 210px;
+  width: 100%;
+}
+
+.deck-filter-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  align-items: end;
 }
 
 .deck-search-field,
@@ -1512,6 +1524,41 @@ textarea:focus {
   display: grid;
   gap: 10px;
   min-width: 180px;
+}
+
+.sandbox-launch-panel {
+  display: grid;
+  gap: 14px;
+}
+
+.sandbox-launch-copy {
+  display: grid;
+  gap: 14px;
+  align-items: start;
+}
+
+.history-hero-panel {
+  position: relative;
+  overflow: hidden;
+}
+
+.history-hero-panel::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(circle at top left, rgba(118, 226, 255, 0.16), transparent 34%),
+    radial-gradient(circle at bottom right, rgba(246, 205, 123, 0.14), transparent 38%);
+  pointer-events: none;
+}
+
+.history-hero-panel > * {
+  position: relative;
+  z-index: 1;
+}
+
+.history-hero-header {
+  align-items: start;
 }
 
 .playtest-hero-panel,
@@ -3165,7 +3212,11 @@ input[type="range"] {
   }
 
   .view-panel-grid {
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: 1fr;
+  }
+
+  .deck-filter-grid {
+    grid-template-columns: 1fr;
   }
 
   .deck-workspace-title {

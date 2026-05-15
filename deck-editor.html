@@ -98,7 +98,6 @@
                     <option value="text">Text</option>
                   </select>
                 </label>
-                <button id="open-playtest-button" type="button" class="small-button primary-button">Playtest</button>
                 <button id="toggle-history-button" type="button" class="small-button ghost-button">History</button>
                 <button id="clear-deck-button" class="small-button danger-button">Clear Deck</button>
               </div>
@@ -111,19 +110,24 @@
             <span>Search Cards</span>
             <input id="search-input" type="search" placeholder="Start typing a card name like Bolmeteus, Meloppe, Aqua Hulcus">
           </label>
-          <label class="field builder-filter-field">
-            <span>Civilization</span>
-            <select id="civilization-filter"><option value="all">All</option></select>
-          </label>
-          <label class="field builder-filter-field">
-            <span>Type</span>
-            <select id="type-filter"><option value="all">All</option></select>
-          </label>
-          <label class="field builder-cost-field">
-            <span>Mana Up To <strong id="cost-filter-value">14</strong></span>
-            <input id="cost-filter" type="range" min="1" max="14" value="14">
-          </label>
-          <button id="reset-filters-button" class="small-button">Reset Filters</button>
+          <details class="view-panel deck-filter-dropdown">
+            <summary class="ghost-button view-panel-toggle">Filters</summary>
+            <div class="deck-filter-grid">
+              <label class="field builder-filter-field">
+                <span>Civilization</span>
+                <select id="civilization-filter"><option value="all">All</option></select>
+              </label>
+              <label class="field builder-filter-field">
+                <span>Type</span>
+                <select id="type-filter"><option value="all">All</option></select>
+              </label>
+              <label class="field builder-cost-field">
+                <span>Mana Up To <strong id="cost-filter-value">14</strong></span>
+                <input id="cost-filter" type="range" min="1" max="14" value="14">
+              </label>
+              <button id="reset-filters-button" class="small-button">Reset Filters</button>
+            </div>
+          </details>
         </div>
 
         <p id="share-status" class="hero-text" data-status></p>
@@ -165,16 +169,16 @@
         </div>
       </section>
 
-      <section id="deck-history-panel" class="panel deck-history-panel" data-builder-editor hidden>
+      <section class="panel sandbox-launch-panel" data-builder-editor>
         <div class="panel-header">
           <div>
-            <p class="section-label">Deck History</p>
-            <h2>Tracked changes</h2>
+            <p class="section-label">Sandbox Mode</p>
+            <h2>Test your lines without leaving the vault</h2>
           </div>
         </div>
-
-        <div id="deck-history-list" class="deck-history-list">
-          <p class="hero-text">Open or save a deck to start tracking its history.</p>
+        <div class="sandbox-launch-copy">
+          <p class="hero-text">Open the playtest sandbox to draw hands, set shields, move cards across zones, and goldfish turns with the current deck.</p>
+          <button id="open-playtest-button" type="button" class="primary-button">Open Sandbox Mode</button>
         </div>
       </section>
     </main>
