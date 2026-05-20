@@ -1047,16 +1047,6 @@ function renderPlaytestActionOverlay() {
   if (!anchor || !actions.length) {
     return;
   }
-  const rect = anchor.getBoundingClientRect();
-  overlay.classList.toggle("is-below", state.playtestSelected.zone === "hand" || state.playtestSelected.zone === "shields");
-  const top = state.playtestSelected.zone === "hand" || state.playtestSelected.zone === "shields"
-    ? rect.bottom + 10
-    : rect.top + rect.height / 2;
-  const left = state.playtestSelected.zone === "hand" || state.playtestSelected.zone === "shields"
-    ? rect.left + rect.width / 2
-    : rect.right + 12;
-  overlay.style.top = `${top}px`;
-  overlay.style.left = `${left}px`;
   for (const action of actions) {
     const button = document.createElement("button");
     button.type = "button";
@@ -1068,6 +1058,32 @@ function renderPlaytestActionOverlay() {
     });
     overlay.append(button);
   }
+  const rect = anchor.getBoundingClientRect();
+  const padding = 12;
+  const gap = 10;
+  const menuWidth = 168;
+  overlay.style.width = `${menuWidth}px`;
+  overlay.hidden = false;
+  overlay.style.visibility = "hidden";
+  overlay.classList.remove("is-below");
+  const menuHeight = overlay.offsetHeight || (actions.length * 46) + ((actions.length - 1) * 8);
+  let top = rect.top - menuHeight - gap;
+  if (top < padding) {
+    top = rect.bottom + gap;
+  }
+  if (top + menuHeight > window.innerHeight - padding) {
+    top = Math.max(padding, window.innerHeight - menuHeight - padding);
+  }
+  let left = rect.left + (rect.width / 2) - (menuWidth / 2);
+  if (left < padding) {
+    left = padding;
+  }
+  if (left + menuWidth > window.innerWidth - padding) {
+    left = window.innerWidth - menuWidth - padding;
+  }
+  overlay.style.top = `${Math.round(top)}px`;
+  overlay.style.left = `${Math.round(left)}px`;
+  overlay.style.visibility = "visible";
   overlay.hidden = false;
 }
 

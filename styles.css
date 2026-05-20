@@ -2565,9 +2565,14 @@ body[data-page="playtest"] .page-stack {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  width: 156px;
-  transform: translateY(-50%);
+  width: 168px;
   pointer-events: auto;
+  padding: 10px;
+  border-radius: 18px;
+  border: 1px solid rgba(129, 215, 255, 0.24);
+  background: rgba(7, 16, 29, 0.96);
+  box-shadow: 0 22px 44px rgba(2, 8, 16, 0.48);
+  backdrop-filter: blur(12px);
 }
 
 .playtest-action-overlay.is-below {
@@ -2622,11 +2627,147 @@ body[data-page="playtest"] .playtest-battle-zone-shell {
   background: rgba(255, 255, 255, 0.03);
 }
 
+.playtest-pile-zone {
+  display: grid;
+  justify-items: center;
+  align-content: start;
+  gap: 12px;
+  min-height: 236px;
+}
+
+.playtest-bottom-rail {
+  grid-template-columns: minmax(0, 1fr) 388px;
+}
+
+.playtest-side-zones {
+  grid-template-columns: minmax(150px, 1fr) minmax(150px, 1fr);
+  align-items: start;
+}
+
+.playtest-pile-shell {
+  min-width: 0;
+}
+
+.playtest-inline-card-row,
+.playtest-card-grid,
+.playtest-pile-zone,
+.playtest-mini-zone,
+.playtest-pile-shell,
+.playtest-hand-shell,
+.playtest-side-zones,
+.playtest-shield-strip,
+.playtest-mana-zone-shell {
+  overflow: visible;
+}
+
+.playtest-inline-card-row-hand,
+.playtest-inline-card-row-shields {
+  overflow-x: auto;
+  overflow-y: visible;
+  padding-bottom: 10px;
+  scrollbar-width: thin;
+}
+
+.playtest-inline-card-row-shields > * {
+  width: 84px;
+}
+
+.playtest-inline-card-row > * {
+  width: 104px;
+}
+
+.playtest-inline-card-row-hand > * {
+  width: 112px;
+}
+
+.playtest-card-grid-battle {
+  grid-template-columns: repeat(auto-fit, minmax(104px, max-content));
+  gap: 12px;
+}
+
+.playtest-pile-zone .playtest-deck-stack {
+  position: relative;
+  width: 94px;
+  aspect-ratio: 63 / 88;
+  margin: 0 auto;
+}
+
+.playtest-pile-zone .playtest-deck-stack-card,
+.playtest-pile-zone .playtest-deck-stack-top,
+.playtest-card-back {
+  background-position: center !important;
+  background-size: cover !important;
+  background-repeat: no-repeat !important;
+}
+
+.playtest-pile-zone .playtest-deck-stack-card,
+.playtest-pile-zone .playtest-deck-stack-top {
+  border-radius: 16px;
+  box-shadow: 0 14px 26px rgba(0, 0, 0, 0.3);
+}
+
+.playtest-pile-zone .playtest-deck-stack-card:nth-child(1) {
+  transform: translate(10px, 10px);
+}
+
+.playtest-pile-zone .playtest-deck-stack-card:nth-child(2) {
+  transform: translate(5px, 5px);
+}
+
+.playtest-pile-zone .playtest-deck-stack-top::after,
+.playtest-card-back::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: linear-gradient(180deg, rgba(6, 14, 28, 0.16), rgba(6, 14, 28, 0.42));
+  pointer-events: none;
+}
+
+.playtest-card-back {
+  position: relative;
+  overflow: hidden;
+}
+
 .workspace-grid {
   display: grid;
   grid-template-columns: minmax(0, 1.2fr) 320px;
   gap: 18px;
   margin-top: 14px;
+}
+
+body[data-page="playtest"] {
+  --playtest-card-size: 112px;
+}
+
+body[data-page="playtest"] .playtest-card,
+body[data-page="playtest"] .playtest-inline-card-row > .playtest-card,
+body[data-page="playtest"] .playtest-card-grid-battle > .playtest-card {
+  width: var(--playtest-card-size);
+}
+
+body[data-page="playtest"] .playtest-card-image-button {
+  display: block;
+  width: 100%;
+}
+
+body[data-page="playtest"] .playtest-card-image,
+body[data-page="playtest"] .playtest-card-back {
+  width: 100%;
+}
+
+body[data-page="playtest"] .playtest-inline-card-row-hand > *,
+body[data-page="playtest"] .playtest-inline-card-row-shields > * {
+  width: var(--playtest-card-size);
+}
+
+body[data-page="playtest"] .playtest-card-grid-battle {
+  grid-template-columns: repeat(auto-fit, minmax(var(--playtest-card-size), max-content));
+  gap: 12px;
+}
+
+body[data-page="playtest"] .playtest-pile-zone .playtest-deck-stack {
+  width: var(--playtest-card-size);
 }
 
 .workspace-grid-single {
