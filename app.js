@@ -7,6 +7,9 @@ const COOKIE_CONSENT_KEY = "paladins-vault-cookie-consent";
 const DEFAULT_LOGO_URL = "/assets/assets/crystal-vault-logo.png";
 const PLAYTEST_CARD_BACK_FILE = "playtest-card-back.webp";
 const PLAYTEST_BALLOM_VIDEO_FILE = "ballom-evolve-destroy.mp4";
+const PLAYTEST_CRYSTAL_PALADIN_VIDEO_FILE = "crystal-paladin-evolve.mp4";
+const PLAYTEST_ALCADEIAS_VIDEO_FILE = "alcadeias-evolve.mp4";
+const PROFILE_CACHE_KEY = "paladins-vault-active-profile-cache";
 const AVATAR_PRESETS = {
   Water: ["Aqua Guard", "Aqua Hulcus", "Emeral", "Crystal Paladin", "Aqua Sniper", "King Tsunami"],
   Darkness: ["Marrow Ooze, the Twister", "Propeller Mutant", "Phantasmal Horror Gigazald", "Deathliger, Lion of Chaos", "Ballom, Master of Death", "Super Necrodragon Abzo Dolba"],
@@ -326,6 +329,7 @@ const elements = {
   playtestTurnDec: document.querySelector("#playtest-turn-dec"),
   playtestTurnInput: document.querySelector("#playtest-turn-input"),
   playtestTurnInc: document.querySelector("#playtest-turn-inc"),
+  playtestExitButton: document.querySelector("#playtest-exit-button"),
   playtestTurnValue: document.querySelector("#playtest-turn-value"),
   playtestDrawCount: document.querySelector("#playtest-draw-count"),
   playtestShieldCount: document.querySelector("#playtest-shield-count"),
@@ -394,6 +398,10 @@ async function initialize() {
   ensureMobileNavToggle();
   ensureCookieConsentBanner();
   setActiveNav();
+  primeCachedProfileState();
+  renderAuthNavigation();
+  renderWelcome();
+  renderProfile();
   bindEvents();
   if (isPlaytestPage) {
     try {
@@ -518,6 +526,10 @@ function playtestPagePath() {
 
 function historyPagePath() {
   return window.location.protocol === "file:" ? "./history.html" : "/builder/history";
+}
+
+function builderEditorPath() {
+  return window.location.protocol === "file:" ? "./deck-editor.html" : "/builder/editor";
 }
 
 function resolveAssetUrl(path) {
@@ -712,8 +724,13 @@ function completeEvolutionPlay(targetUid) {
   state.playtestSelected = null;
   persistPlaytestState();
   renderPlaytestSandbox();
-  if (normalizeName(evolution.card.name) === "ballom master of death") {
+  const evolvedName = normalizeName(evolution.card.name);
+  if (evolvedName === "ballom master of death") {
     playBallomEvolutionAnimation();
+  } else if (evolvedName === "crystal paladin") {
+    playCrystalPaladinEvolutionAnimation();
+  } else if (evolvedName === "alcadeias lord of spirits") {
+    playAlcadeiasEvolutionAnimation();
   }
   if (ballomDestroyed.length) {
     setStatus(`${evolution.card.name} evolved and destroyed ${ballomDestroyed.join(", ")}.`, "success");
@@ -749,24 +766,36 @@ function resolveBallomBattlefieldWipe(ballomUid) {
 }
 
 function closePlaytestCinematicModal() {
-  if (elements.playtestCinematicVideo) {
-    elements.playtestCinematicVideo.pause();
-    elements.playtestCinematicVideo.currentTime = 0;
+  const modal = elements.playtestCinematicModal;
+  const video = elements.playtestCinematicVideo;
+  if (!modal || !video) {
+    return;
   }
-  if (elements.playtestCinematicModal) {
-    elements.playtestCinematicModal.hidden = true;
-  }
+  modal.classList.remove("is-visible");
+  modal.classList.add("is-closing");
+  window.setTimeout(() => {
+    video.pause();
+    video.currentTime = 0;
+    modal.hidden = true;
+    modal.classList.remove("is-closing");
+  }, 340);
 }
 
-function playBallomEvolutionAnimation() {
+function playPlaytestCinematic(filename) {
   if (!elements.playtestCinematicModal || !elements.playtestCinematicVideo) {
     return;
   }
+  const modal = elements.playtestCinematicModal;
   const video = elements.playtestCinematicVideo;
-  elements.playtestCinematicModal.hidden = false;
+  modal.hidden = false;
+  modal.classList.remove("is-closing");
+  modal.classList.remove("is-visible");
   video.pause();
   video.currentTime = 0;
-  video.src = playtestAssetUrl(PLAYTEST_BALLOM_VIDEO_FILE);
+  video.src = playtestAssetUrl(filename);
+  requestAnimationFrame(() => {
+    modal.classList.add("is-visible");
+  });
   const finish = () => {
     video.removeEventListener("ended", finish);
     closePlaytestCinematicModal();
@@ -778,6 +807,18 @@ function playBallomEvolutionAnimation() {
       window.setTimeout(closePlaytestCinematicModal, 4500);
     });
   }
+}
+
+function playBallomEvolutionAnimation() {
+  playPlaytestCinematic(PLAYTEST_BALLOM_VIDEO_FILE);
+}
+
+function playCrystalPaladinEvolutionAnimation() {
+  playPlaytestCinematic(PLAYTEST_CRYSTAL_PALADIN_VIDEO_FILE);
+}
+
+function playAlcadeiasEvolutionAnimation() {
+  playPlaytestCinematic(PLAYTEST_ALCADEIAS_VIDEO_FILE);
 }
 
 function isShieldTriggerCard(card) {
@@ -2052,6 +2093,10 @@ function bindEvents() {
   elements.playtestResetButton?.addEventListener("click", () => {
     hardRestartPlaytestGame();
   });
+  elements.playtestExitButton?.addEventListener("click", () => {
+    const target = `${builderEditorPath()}${state.loadedShareId && window.location.protocol !== "file:" ? `?deck=${encodeURIComponent(state.loadedShareId)}` : ""}`;
+    window.location.assign(target);
+  });
   elements.playtestTurnInput?.addEventListener("change", (event) => {
     const nextTurn = Math.max(1, Number(event.target.value) || 1);
     state.playtest.turn = nextTurn;
@@ -2224,6 +2269,7 @@ async function hydrateProfiles() {
   const payload = await fetchJson(`${API_BASE}/profiles${params.toString() ? `?${params.toString()}` : ""}`);
   state.profiles = payload.items;
   state.activeProfileId = state.profiles.some((profile) => profile.id === storedId) ? storedId : null;
+  persistActiveProfileCache();
 }
 
 async function hydrateDeckCards() {
@@ -4207,7 +4253,67 @@ function applyFollowButtonState(button, profileId) {
   button.textContent = followed ? "Unfollow" : "Follow";
   button.classList.toggle("is-unfollow", followed);
   button.classList.toggle("primary-button", !followed);
-  button.classList.toggle("ghost-button", followed);
+  button.classList.toggle("danger-button", followed);
+  button.classList.remove("ghost-button");
+}
+
+function setProfileFollowState(profileId, followed) {
+  state.profiles = state.profiles.map((profile) => {
+    if (profile.id !== profileId) {
+      return profile;
+    }
+    const currentFollowed = Boolean(profile.followed_by_viewer);
+    const followerDelta = followed === currentFollowed ? 0 : (followed ? 1 : -1);
+    return {
+      ...profile,
+      followed_by_viewer: followed,
+      follower_count: Math.max(0, (profile.follower_count ?? 0) + followerDelta)
+    };
+  });
+
+  if (state.viewedProfile?.id === profileId) {
+    const currentFollowed = Boolean(state.viewedProfile.followed_by_viewer);
+    const followerDelta = followed === currentFollowed ? 0 : (followed ? 1 : -1);
+    state.viewedProfile = {
+      ...state.viewedProfile,
+      followed_by_viewer: followed,
+      follower_count: Math.max(0, (state.viewedProfile.follower_count ?? 0) + followerDelta)
+    };
+  }
+
+  if (state.loadedDeckOwner?.id === profileId) {
+    const listed = state.profiles.find((profile) => profile.id === profileId);
+    if (listed) {
+      state.loadedDeckOwner = {
+        ...state.loadedDeckOwner,
+        followed_by_viewer: Boolean(listed.followed_by_viewer),
+        follower_count: listed.follower_count ?? state.loadedDeckOwner.follower_count
+      };
+    }
+  }
+
+  if (state.activeProfileDetail) {
+    const following = [...(state.activeProfileDetail.following || [])];
+    const existingIndex = following.findIndex((profile) => profile.id === profileId);
+    const targetProfile = state.profiles.find((profile) => profile.id === profileId)
+      || state.viewedProfile
+      || state.loadedDeckOwner;
+    if (followed && existingIndex === -1 && targetProfile) {
+      following.push({ id: targetProfile.id, username: targetProfile.username });
+      state.activeProfileDetail = {
+        ...state.activeProfileDetail,
+        following,
+        following_count: Math.max(0, (state.activeProfileDetail.following_count ?? 0) + 1)
+      };
+    } else if (!followed && existingIndex !== -1) {
+      following.splice(existingIndex, 1);
+      state.activeProfileDetail = {
+        ...state.activeProfileDetail,
+        following,
+        following_count: Math.max(0, (state.activeProfileDetail.following_count ?? 0) - 1)
+      };
+    }
+  }
 }
 
 async function toggleFollowProfile(profileId) {
@@ -4215,23 +4321,52 @@ async function toggleFollowProfile(profileId) {
     setStatus("Log in first to follow profiles.", "error");
     return;
   }
-  await fetchJson(`${API_BASE}/profiles/${profileId}/follow`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ follower_profile_id: state.activeProfileId })
-  });
-  await hydrateProfiles();
-  await loadProfileDecks(state.activeProfileId);
-  await loadNotifications();
-  if (needsExploreDecks(page)) {
-    renderExploreUsers();
-  }
-  if (state.viewedProfile?.id === profileId) {
-    state.viewedProfile = await fetchJson(withViewer(`${API_BASE}/profiles/${profileId}`));
-  }
+  const previousProfiles = state.profiles.map((profile) => ({ ...profile }));
+  const previousViewedProfile = state.viewedProfile ? { ...state.viewedProfile } : null;
+  const previousLoadedDeckOwner = state.loadedDeckOwner ? { ...state.loadedDeckOwner } : null;
+  const previousActiveProfileDetail = state.activeProfileDetail
+    ? { ...state.activeProfileDetail, following: [...(state.activeProfileDetail.following || [])] }
+    : null;
+  const nextFollowed = !isProfileFollowed(profileId);
+
+  setProfileFollowState(profileId, nextFollowed);
   renderProfile();
   renderExploreUsers();
-  renderNotifications();
+  renderBuilder();
+
+  try {
+    await fetchJson(`${API_BASE}/profiles/${profileId}/follow`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ follower_profile_id: state.activeProfileId })
+    });
+  } catch (error) {
+    state.profiles = previousProfiles;
+    state.viewedProfile = previousViewedProfile;
+    state.loadedDeckOwner = previousLoadedDeckOwner;
+    state.activeProfileDetail = previousActiveProfileDetail;
+    renderProfile();
+    renderExploreUsers();
+    renderBuilder();
+    throw error;
+  }
+
+  void hydrateProfiles().then(() => {
+    renderAuthNavigation();
+    renderProfile();
+    renderExploreUsers();
+    renderBuilder();
+  }).catch(() => {});
+  void loadProfileDecks(state.activeProfileId).then(() => renderProfileDecks()).catch(() => {});
+  void loadNotifications().then(() => renderNotifications()).catch(() => {});
+  if (state.viewedProfile?.id === profileId) {
+    void fetchJson(withViewer(`${API_BASE}/profiles/${profileId}`))
+      .then((payload) => {
+        state.viewedProfile = payload;
+        renderProfile();
+      })
+      .catch(() => {});
+  }
 }
 
 async function toggleFollowViewedProfile() {
@@ -5582,6 +5717,7 @@ async function loginProfile() {
   state.activeProfileId = payload.profile.id;
   window.localStorage.setItem(PROFILE_STORAGE_KEY, String(payload.profile.id));
   await hydrateProfiles();
+  persistActiveProfileCache();
   await loadNotifications();
   if (elements.loginEmail) elements.loginEmail.value = "";
   if (elements.loginPassword) elements.loginPassword.value = "";
@@ -5649,6 +5785,7 @@ function logoutProfile() {
   state.profileDecks = [];
   state.deckReadOnly = Boolean(state.deckOwnerId);
   window.localStorage.removeItem(PROFILE_STORAGE_KEY);
+  window.localStorage.removeItem(PROFILE_CACHE_KEY);
   renderBuilderDeckOptions();
   renderBuilderEntry();
   renderWelcome();
@@ -5678,6 +5815,7 @@ async function saveProfileUsername() {
     });
     state.profiles = state.profiles.map((profile) => profile.id === payload.id ? payload : profile);
     await hydrateProfiles();
+    persistActiveProfileCache();
     await loadProfileDecks(state.activeProfileId);
     if (state.viewedProfile?.id === state.activeProfileId) {
       state.viewedProfile = await fetchJson(withViewer(`${API_BASE}/profiles/${state.activeProfileId}`));
@@ -5851,6 +5989,7 @@ async function saveProfileAvatar(nextAvatarUrl = null, options = {}) {
   if (elements.profileAvatarUrlInput) {
     elements.profileAvatarUrlInput.value = payload.avatar_url || "";
   }
+  persistActiveProfileCache();
   applyLocalAvatarUpdate(payload.avatar_url || null);
   if (!silent) {
     setStatus("Profile image saved.", "success");
@@ -5874,7 +6013,47 @@ function deckSnapshotTitle() {
 }
 
 function activeProfile() {
-  return state.profiles.find((profile) => profile.id === state.activeProfileId) ?? null;
+  return state.profiles.find((profile) => profile.id === state.activeProfileId) ?? cachedActiveProfile();
+}
+
+function cachedActiveProfile() {
+  try {
+    const raw = window.localStorage.getItem(PROFILE_CACHE_KEY);
+    if (!raw) {
+      return null;
+    }
+    const parsed = JSON.parse(raw);
+    return parsed?.id ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function primeCachedProfileState() {
+  const storedId = Number(window.localStorage.getItem(PROFILE_STORAGE_KEY));
+  if (storedId && !state.activeProfileId) {
+    state.activeProfileId = storedId;
+  }
+}
+
+function persistActiveProfileCache() {
+  const profile = state.profiles.find((item) => item.id === state.activeProfileId);
+  if (!profile) {
+    window.localStorage.removeItem(PROFILE_CACHE_KEY);
+    return;
+  }
+  window.localStorage.setItem(PROFILE_CACHE_KEY, JSON.stringify({
+    id: profile.id,
+    username: profile.username,
+    display_name: profile.display_name,
+    avatar_url: profile.avatar_url || null,
+    email_verified: Boolean(profile.email_verified),
+    email: profile.email || "",
+    is_admin: Boolean(profile.is_admin),
+    bio: profile.bio || "",
+    follower_count: profile.follower_count ?? 0,
+    following_count: profile.following_count ?? 0
+  }));
 }
 
 function uniqueDuplicateTitle(baseTitle) {

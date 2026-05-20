@@ -1268,6 +1268,16 @@ textarea:focus {
 
 .playtest-cinematic-shell {
   z-index: 2147483646;
+  opacity: 0;
+  transition: opacity 320ms ease;
+}
+
+.playtest-cinematic-shell.is-visible {
+  opacity: 1;
+}
+
+.playtest-cinematic-shell.is-closing {
+  opacity: 0;
 }
 
 .playtest-cinematic-backdrop {
@@ -1288,6 +1298,18 @@ textarea:focus {
   height: 100vh;
   object-fit: cover;
   display: block;
+  transform: scale(1.02);
+  transition: transform 320ms ease, filter 320ms ease;
+  filter: saturate(1.02);
+}
+
+.playtest-cinematic-shell.is-visible .playtest-cinematic-video {
+  transform: scale(1);
+}
+
+.playtest-cinematic-shell.is-closing .playtest-cinematic-video {
+  transform: scale(1.015);
+  filter: saturate(0.92) brightness(0.92);
 }
 
 .export-progress-track {
@@ -5094,4 +5116,17 @@ input[type="range"] {
   body[data-page="playtest"] .playtest-inline-card-row {
     gap: 6px;
   }
+}
+
+body[data-page="playtest"] .playtest-side-button-danger {
+  border-color: rgba(255, 124, 124, 0.72) !important;
+  background: linear-gradient(180deg, rgba(236, 86, 86, 0.98), rgba(143, 26, 26, 0.98)) !important;
+  color: #fff5f5 !important;
+  box-shadow: 0 0 22px rgba(190, 34, 34, 0.28) !important;
+}
+
+body[data-page="playtest"] .playtest-side-button-danger:hover,
+body[data-page="playtest"] .playtest-side-button-danger:focus-visible {
+  border-color: rgba(255, 167, 167, 0.82) !important;
+  background: linear-gradient(180deg, rgba(248, 109, 109, 1), rgba(168, 34, 34, 1)) !important;
 }
