@@ -1920,7 +1920,7 @@ textarea:focus {
   font-family: "Cormorant Garamond", serif;
   font-size: 1.45rem;
   letter-spacing: 0.08em;
-  color: #f7fcff;
+  color: transparent;
   border: 1px solid rgba(157, 213, 255, 0.18);
   background:
     radial-gradient(circle at top, rgba(123, 214, 255, 0.24), transparent 38%),
@@ -2072,6 +2072,12 @@ textarea:focus {
 .playtest-turn-actions {
   display: grid;
   gap: 8px;
+}
+
+.playtest-turn-input {
+  min-height: 44px;
+  text-align: center;
+  font-weight: 700;
 }
 
 .playtest-bottom-rail {
@@ -2513,9 +2519,9 @@ body[data-page="playtest"] .page-stack {
 
 .playtest-card[data-zone="hand"] .playtest-card-actions,
 .playtest-card[data-zone="shields"] .playtest-card-actions {
-  top: calc(100% + 10px);
+  top: 50%;
   left: 50%;
-  transform: translateX(-50%);
+  transform: translate(-50%, -50%);
 }
 
 .playtest-card[data-zone="battle"] .playtest-card-actions,
@@ -2523,6 +2529,11 @@ body[data-page="playtest"] .page-stack {
   top: 50%;
   left: calc(100% + 10px);
   transform: translateY(-50%);
+  display: flex !important;
+  flex-direction: column !important;
+  flex-wrap: nowrap !important;
+  align-items: stretch !important;
+  width: 148px !important;
 }
 
 .playtest-card.is-selected .playtest-card-image,
@@ -2589,6 +2600,11 @@ body[data-page="playtest"] .page-stack {
 .playtest-card-actions .small-button {
   min-height: 38px;
   padding: 8px 12px;
+}
+
+.playtest-card[data-zone="battle"] .playtest-card-actions .small-button,
+.playtest-card[data-zone="mana"] .playtest-card-actions .small-button {
+  width: 100%;
 }
 
 .playtest-pile-shell,

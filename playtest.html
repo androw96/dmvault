@@ -55,9 +55,9 @@
             <button id="playtest-shuffle-button" type="button" class="playtest-side-button">Shuffle</button>
             <button id="playtest-draw-button" type="button" class="playtest-side-button">Draw</button>
             <div class="playtest-turn-panel">
-              <span>Turn</span>
+              <span>Set turn</span>
               <div class="playtest-turn-actions">
-                <button id="playtest-turn-dec" type="button" class="small-button ghost-button">-</button>
+                <input id="playtest-turn-input" type="number" min="1" step="1" class="field-input playtest-turn-input" value="1">
                 <button id="playtest-turn-inc" type="button" class="playtest-side-button playtest-side-button-primary">Next Turn</button>
               </div>
             </div>
@@ -76,7 +76,7 @@
                 <div class="playtest-inline-zone-header">
                   <span>Library</span>
                 </div>
-                <div id="playtest-draw-pile-zone" class="playtest-pile-stack"></div>
+                <div id="playtest-draw-pile-zone" class="playtest-pile-zone"></div>
               </section>
 
               <section class="playtest-pile-shell">

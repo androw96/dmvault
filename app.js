@@ -321,6 +321,7 @@ const elements = {
   playtestShuffleButton: document.querySelector("#playtest-shuffle-button"),
   playtestResetButton: document.querySelector("#playtest-reset-button"),
   playtestTurnDec: document.querySelector("#playtest-turn-dec"),
+  playtestTurnInput: document.querySelector("#playtest-turn-input"),
   playtestTurnInc: document.querySelector("#playtest-turn-inc"),
   playtestTurnValue: document.querySelector("#playtest-turn-value"),
   playtestDrawCount: document.querySelector("#playtest-draw-count"),
@@ -588,7 +589,15 @@ function playtestSourceCardChoices() {
 }
 
 function playtestCoverImageUrl() {
-  return resolveAssetUrl(state.playtest.coverImage || state.deckCoverImageUrl || deriveAutomaticDeckCover() || DEFAULT_LOGO_URL);
+  const sourceFallback =
+    state.playtest.sourceCards?.[0]?.illustration_path
+    || state.playtest.sourceCards?.[0]?.image_path
+    || state.playtest.drawPile?.[0]?.card?.illustration_path
+    || state.playtest.drawPile?.[0]?.card?.image_path
+    || state.playtest.hand?.[0]?.card?.illustration_path
+    || state.playtest.hand?.[0]?.card?.image_path
+    || null;
+  return resolveAssetUrl(state.playtest.coverImage || state.deckCoverImageUrl || deriveAutomaticDeckCover() || sourceFallback || DEFAULT_LOGO_URL);
 }
 
 async function ensureDeckCardsHydratedForPlaytest() {
@@ -618,6 +627,7 @@ function setupPlaytestGame(options = {}) {
     turn: keepTurn ? state.playtest.turn : 1,
     ready: true
   });
+  renderPlaytestSandbox();
 }
 
 function restartPlaytestGame() {
@@ -918,7 +928,6 @@ function buildPlaytestCard(zoneName, card) {
     const back = document.createElement("span");
     back.className = "playtest-card-back";
     back.style.background = `linear-gradient(rgba(6, 14, 28, 0.2), rgba(6, 14, 28, 0.6)), url('${playtestCoverImageUrl()}') center / cover no-repeat`;
-    back.textContent = "Shield";
     imageButton.append(back);
   } else {
     const image = document.createElement("img");
@@ -1039,6 +1048,9 @@ function renderPlaytestSandbox() {
   }
   if (elements.playtestTurnValue) {
     elements.playtestTurnValue.textContent = String(state.playtest.turn || 1);
+  }
+  if (elements.playtestTurnInput) {
+    elements.playtestTurnInput.value = String(state.playtest.turn || 1);
   }
   if (elements.playtestDrawButton) {
     elements.playtestDrawButton.disabled = !hasSource || state.playtest.drawPile.length === 0;
@@ -1667,8 +1679,18 @@ function bindEvents() {
     restartPlaytestGame();
     setStatus(`Sandbox restarted with a fresh hand, fresh shields, and a shuffled deck for ${state.playtest.title}.`, "success");
   });
-  elements.playtestTurnDec?.addEventListener("click", () => {
-    state.playtest.turn = Math.max(1, (state.playtest.turn || 1) - 1);
+  elements.playtestTurnInput?.addEventListener("change", (event) => {
+    const nextTurn = Math.max(1, Number(event.target.value) || 1);
+    state.playtest.turn = nextTurn;
+    persistPlaytestState();
+    renderPlaytestSandbox();
+  });
+  elements.playtestTurnInput?.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter") {
+      return;
+    }
+    const nextTurn = Math.max(1, Number(event.target.value) || 1);
+    state.playtest.turn = nextTurn;
     persistPlaytestState();
     renderPlaytestSandbox();
   });
