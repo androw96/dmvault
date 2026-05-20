@@ -2559,13 +2559,15 @@ body[data-page="playtest"] .page-stack {
 }
 
 .playtest-action-overlay {
-  position: fixed;
-  z-index: 2147483647;
+  position: fixed !important;
+  z-index: 2147483647 !important;
+  isolation: isolate;
   display: flex;
   flex-direction: column;
   gap: 8px;
   width: 156px;
   transform: translateY(-50%);
+  pointer-events: auto;
 }
 
 .playtest-action-overlay.is-below {
@@ -2576,6 +2578,17 @@ body[data-page="playtest"] .page-stack {
   min-height: 38px;
   padding: 8px 12px;
   width: 100%;
+}
+
+body[data-page="playtest"] .playtest-card,
+body[data-page="playtest"] .playtest-battlefield,
+body[data-page="playtest"] .playtest-bottom-rail,
+body[data-page="playtest"] .playtest-side-zones,
+body[data-page="playtest"] .playtest-hand-shell,
+body[data-page="playtest"] .playtest-shield-strip,
+body[data-page="playtest"] .playtest-mana-zone-shell,
+body[data-page="playtest"] .playtest-battle-zone-shell {
+  isolation: auto;
 }
 
 .playtest-pile-shell,

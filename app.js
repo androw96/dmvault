@@ -5,6 +5,7 @@ const PROFILE_STORAGE_KEY = "paladins-vault-active-profile";
 const BUILDER_PREFS_KEY = "paladins-vault-builder-prefs";
 const COOKIE_CONSENT_KEY = "paladins-vault-cookie-consent";
 const DEFAULT_LOGO_URL = "/assets/assets/crystal-vault-logo.png";
+const PLAYTEST_CARD_BACK_URL = "/assets/playtest-card-back.webp";
 const AVATAR_PRESETS = {
   Water: ["Aqua Guard", "Aqua Hulcus", "Emeral", "Crystal Paladin", "Aqua Sniper", "King Tsunami"],
   Darkness: ["Marrow Ooze, the Twister", "Propeller Mutant", "Phantasmal Horror Gigazald", "Deathliger, Lion of Chaos", "Ballom, Master of Death", "Super Necrodragon Abzo Dolba"],
@@ -591,15 +592,7 @@ function playtestSourceCardChoices() {
 }
 
 function playtestCoverImageUrl() {
-  const sourceFallback =
-    state.playtest.sourceCards?.[0]?.illustration_path
-    || state.playtest.sourceCards?.[0]?.image_path
-    || state.playtest.drawPile?.[0]?.card?.illustration_path
-    || state.playtest.drawPile?.[0]?.card?.image_path
-    || state.playtest.hand?.[0]?.card?.illustration_path
-    || state.playtest.hand?.[0]?.card?.image_path
-    || null;
-  return resolveAssetUrl(state.playtest.coverImage || state.deckCoverImageUrl || deriveAutomaticDeckCover() || sourceFallback || DEFAULT_LOGO_URL);
+  return resolveAssetUrl(PLAYTEST_CARD_BACK_URL);
 }
 
 async function ensureDeckCardsHydratedForPlaytest() {
@@ -635,6 +628,14 @@ function setupPlaytestGame(options = {}) {
 function restartPlaytestGame() {
   state.playtestSelected = null;
   setupPlaytestGame({ keepTurn: false });
+}
+
+function hardRestartPlaytestGame() {
+  restartPlaytestGame();
+  try {
+    window.sessionStorage.setItem(PLAYTEST_STORAGE_KEY, JSON.stringify(state.playtest));
+  } catch {}
+  window.location.reload();
 }
 
 function movePlaytestCard(sourceZone, uid, targetZone, options = {}) {
@@ -1727,8 +1728,7 @@ function bindEvents() {
     renderPlaytestSandbox();
   });
   elements.playtestResetButton?.addEventListener("click", () => {
-    restartPlaytestGame();
-    setStatus(`Sandbox restarted with a fresh hand, fresh shields, and a shuffled deck for ${state.playtest.title}.`, "success");
+    hardRestartPlaytestGame();
   });
   elements.playtestTurnInput?.addEventListener("change", (event) => {
     const nextTurn = Math.max(1, Number(event.target.value) || 1);
