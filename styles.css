@@ -2516,6 +2516,13 @@ body[data-page="playtest"] .page-stack {
     0 18px 30px rgba(2, 8, 16, 0.34);
 }
 
+.playtest-card.is-evolution-target .playtest-card-image,
+.playtest-card.is-evolution-target .playtest-card-back {
+  box-shadow:
+    0 0 0 3px rgba(255, 214, 94, 0.72),
+    0 18px 30px rgba(2, 8, 16, 0.38);
+}
+
 .playtest-card.is-tapped {
   transform: none;
   margin: 0;

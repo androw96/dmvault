@@ -129,7 +129,8 @@ const state = {
     turn: 1,
     ready: false
   },
-  playtestSelected: null
+  playtestSelected: null,
+  playtestEvolutionPick: null
 };
 
 const elements = {
@@ -572,6 +573,86 @@ function isSpellCard(card) {
   return /\bspell\b/i.test(card?.type || "");
 }
 
+function isChargerSpellCard(card) {
+  return isSpellCard(card) && /\bcharger\b/i.test(`${card?.name || ""} ${card?.text || ""}`);
+}
+
+function isEvolutionCard(card) {
+  return /\bevolution\b/i.test(`${card?.type || ""} ${card?.text || ""}`);
+}
+
+function normalizePlaytestRequirement(value) {
+  return normalizeName(String(value || "")
+    .replace(/\bcreatures?\b/gi, "")
+    .replace(/\bcards?\b/gi, "")
+    .replace(/\bone of your\b/gi, "")
+    .replace(/\byour\b/gi, "")
+    .replace(/[.,;:()[\]/-]/g, " ")
+    .trim());
+}
+
+function extractEvolutionRequirement(card) {
+  const text = String(card?.text || "");
+  const match = text.match(/put on one of your\s+([^.]+?)(?:\.|$)/i);
+  if (!match) {
+    return "";
+  }
+  return normalizePlaytestRequirement(match[1]);
+}
+
+function battleCardsEligibleForEvolution(card) {
+  const requirement = extractEvolutionRequirement(card);
+  const evolutionRace = normalizePlaytestRequirement(card?.race_label || "");
+  return (state.playtest.battle || []).filter((entry) => {
+    const candidateRace = normalizePlaytestRequirement(entry.card?.race_label || "");
+    const candidateType = normalizePlaytestRequirement(entry.card?.type || "");
+    if (requirement) {
+      return candidateRace.includes(requirement) || candidateType.includes(requirement);
+    }
+    return Boolean(evolutionRace) && candidateRace === evolutionRace;
+  });
+}
+
+function beginEvolutionPlay(card) {
+  const eligible = battleCardsEligibleForEvolution(card.card);
+  if (!eligible.length) {
+    setStatus(`No valid evolution target is in your Battle Zone for ${card.card.name}.`, "error");
+    return;
+  }
+  state.playtestEvolutionPick = {
+    sourceUid: card.uid,
+    eligibleUids: eligible.map((entry) => entry.uid)
+  };
+  state.playtestSelected = null;
+  renderPlaytestSandbox();
+  setStatus(`Select a Battle Zone card to evolve into ${card.card.name}.`, "info");
+}
+
+function completeEvolutionPlay(targetUid) {
+  const pick = state.playtestEvolutionPick;
+  if (!pick) {
+    return;
+  }
+  const handIndex = state.playtest.hand.findIndex((entry) => entry.uid === pick.sourceUid);
+  const battleIndex = state.playtest.battle.findIndex((entry) => entry.uid === targetUid);
+  if (handIndex === -1 || battleIndex === -1) {
+    state.playtestEvolutionPick = null;
+    renderPlaytestSandbox();
+    return;
+  }
+  const [evolution] = state.playtest.hand.splice(handIndex, 1);
+  state.playtest.battle.splice(battleIndex, 1, {
+    ...evolution,
+    faceDown: false,
+    tapped: false
+  });
+  state.playtestEvolutionPick = null;
+  state.playtestSelected = null;
+  persistPlaytestState();
+  renderPlaytestSandbox();
+  setStatus(`${evolution.card.name} evolved successfully.`, "success");
+}
+
 function isShieldTriggerCard(card) {
   return /\bshield\s*trigger\b/i.test(card?.text || "");
 }
@@ -627,6 +708,7 @@ function setupPlaytestGame(options = {}) {
 
 function restartPlaytestGame() {
   state.playtestSelected = null;
+  state.playtestEvolutionPick = null;
   setupPlaytestGame({ keepTurn: false });
 }
 
@@ -701,6 +783,7 @@ function drawPlaytestCards(count = 1) {
   }
   state.playtest.ready = true;
   state.playtestSelected = null;
+  state.playtestEvolutionPick = null;
   persistPlaytestState();
   renderPlaytestSandbox();
 }
@@ -720,6 +803,7 @@ function tutorPlaytestCardFromLibrary(uid) {
   state.playtest.hand.push({ ...card, faceDown: false, tapped: false });
   state.playtest.drawPile = shuffleArray(state.playtest.drawPile);
   state.playtestSelected = null;
+  state.playtestEvolutionPick = null;
   persistPlaytestState();
   closePlaytestLibraryModal();
   renderPlaytestSandbox();
@@ -867,7 +951,15 @@ function playtestActionDefinitions(zoneName, card) {
         label: "Play",
         run: () => {
           if (isSpellCard(card.card)) {
+            if (isChargerSpellCard(card.card)) {
+              movePlaytestCard("hand", card.uid, "mana", { faceDown: false, resetTapped: true });
+              return;
+            }
             movePlaytestCard("hand", card.uid, "graveyard", { faceDown: false, resetTapped: true });
+            return;
+          }
+          if (isEvolutionCard(card.card)) {
+            beginEvolutionPlay(card);
             return;
           }
           movePlaytestCard("hand", card.uid, "battle", { faceDown: false, resetTapped: true });
@@ -912,10 +1004,19 @@ function buildPlaytestCard(zoneName, card) {
   article.className = "playtest-card";
   article.dataset.zone = zoneName;
   article.dataset.uid = card.uid;
+  const canQuickToggleTap = zoneName === "mana" || zoneName === "battle";
+  const isEvolutionTarget = zoneName === "battle"
+    && state.playtestEvolutionPick
+    && state.playtestEvolutionPick.eligibleUids.includes(card.uid);
   article.classList.toggle("is-tapped", Boolean(card.tapped));
   article.classList.toggle("is-facedown", Boolean(card.faceDown));
   article.classList.toggle("is-selected", state.playtestSelected?.uid === card.uid && state.playtestSelected?.zone === zoneName);
+  article.classList.toggle("is-evolution-target", Boolean(isEvolutionTarget));
   article.addEventListener("click", () => {
+    if (isEvolutionTarget) {
+      completeEvolutionPlay(card.uid);
+      return;
+    }
     if (state.playtestSelected?.uid === card.uid && state.playtestSelected?.zone === zoneName) {
       state.playtestSelected = null;
     } else {
@@ -923,6 +1024,12 @@ function buildPlaytestCard(zoneName, card) {
     }
     renderPlaytestSandbox();
   });
+  if (canQuickToggleTap) {
+    article.addEventListener("dblclick", (event) => {
+      event.preventDefault();
+      togglePlaytestTapped(zoneName, card.uid);
+    });
+  }
 
   const imageButton = document.createElement("button");
   imageButton.type = "button";
@@ -944,6 +1051,10 @@ function buildPlaytestCard(zoneName, card) {
   }
   imageButton.addEventListener("click", (event) => {
     event.stopPropagation();
+    if (isEvolutionTarget) {
+      completeEvolutionPlay(card.uid);
+      return;
+    }
     if (state.playtestSelected?.uid === card.uid && state.playtestSelected?.zone === zoneName) {
       state.playtestSelected = null;
     } else {
@@ -951,6 +1062,13 @@ function buildPlaytestCard(zoneName, card) {
     }
     renderPlaytestSandbox();
   });
+  if (canQuickToggleTap) {
+    imageButton.addEventListener("dblclick", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      togglePlaytestTapped(zoneName, card.uid);
+    });
+  }
   article.append(imageButton);
   return article;
 }
