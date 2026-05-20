@@ -5,8 +5,8 @@ const PROFILE_STORAGE_KEY = "paladins-vault-active-profile";
 const BUILDER_PREFS_KEY = "paladins-vault-builder-prefs";
 const COOKIE_CONSENT_KEY = "paladins-vault-cookie-consent";
 const DEFAULT_LOGO_URL = "/assets/assets/crystal-vault-logo.png";
-const PLAYTEST_CARD_BACK_URL = "/assets/playtest-card-back.webp";
-const PLAYTEST_BALLOM_VIDEO_URL = "/assets/ballom-evolve-destroy.mp4";
+const PLAYTEST_CARD_BACK_FILE = "playtest-card-back.webp";
+const PLAYTEST_BALLOM_VIDEO_FILE = "ballom-evolve-destroy.mp4";
 const AVATAR_PRESETS = {
   Water: ["Aqua Guard", "Aqua Hulcus", "Emeral", "Crystal Paladin", "Aqua Sniper", "King Tsunami"],
   Darkness: ["Marrow Ooze, the Twister", "Propeller Mutant", "Phantasmal Horror Gigazald", "Deathliger, Lion of Chaos", "Ballom, Master of Death", "Super Necrodragon Abzo Dolba"],
@@ -533,12 +533,23 @@ function resolveAssetUrl(path) {
   return path;
 }
 
+function playtestAssetUrl(filename) {
+  if (!filename) {
+    return DEFAULT_LOGO_URL;
+  }
+  if (window.location.protocol === "file:") {
+    return `./assets/${filename}`;
+  }
+  return `/assets/assets/${filename}`;
+}
+
 function createPlaytestInstance(card, index) {
   return {
     uid: `${card.id}-${index}-${Math.random().toString(36).slice(2, 8)}`,
     card,
     tapped: false,
-    faceDown: false
+    faceDown: false,
+    underlays: []
   };
 }
 
@@ -677,10 +688,21 @@ function completeEvolutionPlay(targetUid) {
     return;
   }
   const [evolution] = state.playtest.hand.splice(handIndex, 1);
+  const base = state.playtest.battle[battleIndex];
   state.playtest.battle.splice(battleIndex, 1, {
     ...evolution,
     faceDown: false,
-    tapped: false
+    tapped: false,
+    underlays: [
+      {
+        ...base,
+        underlays: []
+      },
+      ...(base.underlays || []).map((entry) => ({
+        ...entry,
+        underlays: []
+      }))
+    ]
   });
   let ballomDestroyed = [];
   if (normalizeName(evolution.card.name) === "ballom master of death") {
@@ -744,7 +766,7 @@ function playBallomEvolutionAnimation() {
   elements.playtestCinematicModal.hidden = false;
   video.pause();
   video.currentTime = 0;
-  video.src = resolveAssetUrl(PLAYTEST_BALLOM_VIDEO_URL);
+  video.src = playtestAssetUrl(PLAYTEST_BALLOM_VIDEO_FILE);
   const finish = () => {
     video.removeEventListener("ended", finish);
     closePlaytestCinematicModal();
@@ -778,7 +800,7 @@ function playtestSourceCardChoices() {
 }
 
 function playtestCoverImageUrl() {
-  return resolveAssetUrl(PLAYTEST_CARD_BACK_URL);
+  return playtestAssetUrl(PLAYTEST_CARD_BACK_FILE);
 }
 
 async function ensureDeckCardsHydratedForPlaytest() {
@@ -836,15 +858,29 @@ function movePlaytestCard(sourceZone, uid, targetZone, options = {}) {
     return;
   }
   const [card] = source.splice(index, 1);
-  const moved = {
-    ...card,
-    tapped: options.resetTapped ? false : Boolean(options.tapped ?? card.tapped),
-    faceDown: typeof options.faceDown === "boolean" ? options.faceDown : card.faceDown
-  };
-  if (options.toTop) {
-    target.unshift(moved);
+  const stackEntries = [card, ...(card.underlays || [])].map((entry) => ({
+    ...entry,
+    underlays: [],
+    tapped: options.resetTapped ? false : Boolean(options.tapped ?? entry.tapped),
+    faceDown: typeof options.faceDown === "boolean" ? options.faceDown : entry.faceDown
+  }));
+  if (stackEntries.length > 1 && targetZone !== "battle") {
+    if (options.toTop) {
+      target.unshift(...stackEntries);
+    } else {
+      target.push(...stackEntries);
+    }
   } else {
-    target.push(moved);
+    const moved = {
+      ...card,
+      tapped: options.resetTapped ? false : Boolean(options.tapped ?? card.tapped),
+      faceDown: typeof options.faceDown === "boolean" ? options.faceDown : card.faceDown
+    };
+    if (options.toTop) {
+      target.unshift(moved);
+    } else {
+      target.push(moved);
+    }
   }
   state.playtestSelected = null;
   persistPlaytestState();
@@ -1150,6 +1186,7 @@ function buildPlaytestCard(zoneName, card) {
   article.classList.toggle("is-facedown", Boolean(card.faceDown));
   article.classList.toggle("is-selected", state.playtestSelected?.uid === card.uid && state.playtestSelected?.zone === zoneName);
   article.classList.toggle("is-evolution-target", Boolean(isEvolutionTarget));
+  article.classList.toggle("has-underlays", Array.isArray(card.underlays) && card.underlays.length > 0);
   article.addEventListener("click", handleCardClick);
   article.addEventListener("dblclick", handleCardDoubleClick);
 
@@ -1187,6 +1224,12 @@ function buildPlaytestCard(zoneName, card) {
     handleCardDoubleClick(event);
   });
   article.append(imageButton);
+  if (Array.isArray(card.underlays) && card.underlays.length > 0) {
+    const badge = document.createElement("span");
+    badge.className = "playtest-stack-badge";
+    badge.textContent = `+${card.underlays.length}`;
+    article.append(badge);
+  }
   return article;
 }
 

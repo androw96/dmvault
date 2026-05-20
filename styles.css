@@ -2806,6 +2806,48 @@ body[data-page="playtest"] .playtest-card-back {
   width: 100%;
 }
 
+body[data-page="playtest"] .playtest-card.has-underlays .playtest-card-image-button {
+  position: relative;
+}
+
+body[data-page="playtest"] .playtest-card.has-underlays .playtest-card-image-button::before,
+body[data-page="playtest"] .playtest-card.has-underlays .playtest-card-image-button::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 16px;
+  background: rgba(7, 16, 29, 0.28);
+  border: 1px solid rgba(129, 215, 255, 0.12);
+  z-index: -1;
+}
+
+body[data-page="playtest"] .playtest-card.has-underlays .playtest-card-image-button::before {
+  transform: translate(5px, 5px);
+}
+
+body[data-page="playtest"] .playtest-card.has-underlays .playtest-card-image-button::after {
+  transform: translate(10px, 10px);
+}
+
+.playtest-stack-badge {
+  position: absolute;
+  right: -8px;
+  top: -8px;
+  min-width: 26px;
+  height: 26px;
+  padding: 0 7px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.78rem;
+  font-weight: 800;
+  color: #f3fbff;
+  background: linear-gradient(180deg, rgba(97, 193, 255, 0.98), rgba(47, 103, 192, 0.98));
+  box-shadow: 0 8px 18px rgba(2, 8, 16, 0.32);
+  z-index: 3;
+}
+
 body[data-page="playtest"] .playtest-inline-card-row-hand > *,
 body[data-page="playtest"] .playtest-inline-card-row-shields > * {
   width: var(--playtest-card-size);
@@ -4975,5 +5017,81 @@ input[type="range"] {
   body[data-page="playtest"] .playtest-action-overlay .small-button {
     min-height: 36px;
     font-size: 0.92rem;
+  }
+}
+
+@media (max-width: 900px) and (orientation: portrait) {
+  body[data-page="playtest"] {
+    --playtest-card-size: 78px;
+  }
+
+  body[data-page="playtest"] .playtest-table {
+    display: grid;
+    gap: 10px;
+  }
+
+  body[data-page="playtest"] .playtest-sidebar {
+    order: 2;
+    grid-template-columns: 1fr;
+  }
+
+  body[data-page="playtest"] .playtest-battlefield-shell {
+    order: 1;
+  }
+
+  body[data-page="playtest"] .playtest-bottom-rail {
+    order: 3;
+    grid-template-columns: 1fr;
+  }
+
+  body[data-page="playtest"] .playtest-side-zones {
+    grid-template-columns: 1fr;
+  }
+
+  body[data-page="playtest"] .playtest-battlefield {
+    min-height: 40vh;
+  }
+}
+
+@media (max-width: 900px) and (orientation: landscape) {
+  body[data-page="playtest"] {
+    --playtest-card-size: 72px;
+  }
+
+  body[data-page="playtest"] .playtest-table {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 170px;
+    gap: 10px;
+    align-items: start;
+  }
+
+  body[data-page="playtest"] .playtest-battlefield-shell {
+    grid-column: 1;
+  }
+
+  body[data-page="playtest"] .playtest-sidebar {
+    grid-column: 2;
+    position: sticky;
+    top: 10px;
+    width: 100%;
+    grid-template-columns: 1fr;
+  }
+
+  body[data-page="playtest"] .playtest-bottom-rail {
+    grid-column: 1 / -1;
+    grid-template-columns: minmax(0, 1fr) 260px;
+    gap: 10px;
+  }
+
+  body[data-page="playtest"] .playtest-side-zones {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  body[data-page="playtest"] .playtest-battlefield {
+    min-height: 52vh;
+  }
+
+  body[data-page="playtest"] .playtest-inline-card-row {
+    gap: 6px;
   }
 }
