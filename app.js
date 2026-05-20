@@ -6,6 +6,7 @@ const BUILDER_PREFS_KEY = "paladins-vault-builder-prefs";
 const COOKIE_CONSENT_KEY = "paladins-vault-cookie-consent";
 const DEFAULT_LOGO_URL = "/assets/assets/crystal-vault-logo.png";
 const PLAYTEST_CARD_BACK_URL = "/assets/playtest-card-back.webp";
+const PLAYTEST_BALLOM_VIDEO_URL = "/assets/ballom-evolve-destroy.mp4";
 const AVATAR_PRESETS = {
   Water: ["Aqua Guard", "Aqua Hulcus", "Emeral", "Crystal Paladin", "Aqua Sniper", "King Tsunami"],
   Darkness: ["Marrow Ooze, the Twister", "Propeller Mutant", "Phantasmal Horror Gigazald", "Deathliger, Lion of Chaos", "Ballom, Master of Death", "Super Necrodragon Abzo Dolba"],
@@ -341,6 +342,8 @@ const elements = {
   playtestManaZone: document.querySelector("#playtest-mana-zone"),
   playtestGraveyardZone: document.querySelector("#playtest-graveyard-zone"),
   playtestActionOverlay: null,
+  playtestCinematicModal: null,
+  playtestCinematicVideo: null,
   playtestLibraryModal: null,
   playtestLibrarySearchInput: null,
   playtestLibrarySearchResults: null,
@@ -385,6 +388,7 @@ async function initialize() {
   ensureAdminMonthModal();
   ensureAuthModalEnhancements();
   ensurePlaytestActionOverlay();
+  ensurePlaytestCinematicModal();
   ensurePlaytestLibraryModal();
   ensureNotificationMenu();
   ensureMobileNavToggle();
@@ -610,6 +614,13 @@ function normalizePlaytestRequirement(value) {
     .trim());
 }
 
+function canonicalPlaytestTokens(value) {
+  return normalizePlaytestRequirement(value)
+    .split(/\s+/)
+    .map((token) => token.replace(/s$/i, ""))
+    .filter(Boolean);
+}
+
 function extractEvolutionRequirement(card) {
   const text = String(card?.text || "");
   const match = text.match(/put on one of your\s+([^.]+?)(?:\.|$)/i);
@@ -622,13 +633,19 @@ function extractEvolutionRequirement(card) {
 function battleCardsEligibleForEvolution(card) {
   const requirement = extractEvolutionRequirement(card);
   const evolutionRace = normalizePlaytestRequirement(card?.race_label || "");
+  const requirementTokens = canonicalPlaytestTokens(requirement);
+  const evolutionTokens = canonicalPlaytestTokens(evolutionRace);
   return (state.playtest.battle || []).filter((entry) => {
     const candidateRace = normalizePlaytestRequirement(entry.card?.race_label || "");
     const candidateType = normalizePlaytestRequirement(entry.card?.type || "");
+    const candidateTokens = new Set([
+      ...canonicalPlaytestTokens(candidateRace),
+      ...canonicalPlaytestTokens(candidateType)
+    ]);
     if (requirement) {
-      return candidateRace.includes(requirement) || candidateType.includes(requirement);
+      return requirementTokens.every((token) => candidateTokens.has(token));
     }
-    return Boolean(evolutionRace) && candidateRace === evolutionRace;
+    return evolutionTokens.length > 0 && evolutionTokens.every((token) => candidateTokens.has(token));
   });
 }
 
@@ -665,11 +682,80 @@ function completeEvolutionPlay(targetUid) {
     faceDown: false,
     tapped: false
   });
+  let ballomDestroyed = [];
+  if (normalizeName(evolution.card.name) === "ballom master of death") {
+    ballomDestroyed = resolveBallomBattlefieldWipe(targetUid);
+  }
   state.playtestEvolutionPick = null;
   state.playtestSelected = null;
   persistPlaytestState();
   renderPlaytestSandbox();
-  setStatus(`${evolution.card.name} evolved successfully.`, "success");
+  if (normalizeName(evolution.card.name) === "ballom master of death") {
+    playBallomEvolutionAnimation();
+  }
+  if (ballomDestroyed.length) {
+    setStatus(`${evolution.card.name} evolved and destroyed ${ballomDestroyed.join(", ")}.`, "success");
+  } else {
+    setStatus(`${evolution.card.name} evolved successfully.`, "success");
+  }
+}
+
+function resolveBallomBattlefieldWipe(ballomUid) {
+  const survivors = [];
+  const destroyed = [];
+  for (const entry of state.playtest.battle || []) {
+    if (entry.uid === ballomUid) {
+      survivors.push(entry);
+      continue;
+    }
+    const civilizations = Array.isArray(entry.card?.civilizations) ? entry.card.civilizations : [];
+    const isCreature = /\bcreature\b/i.test(entry.card?.type || "");
+    const hasDarkness = civilizations.some((civilization) => normalizeName(civilization) === "darkness");
+    if (isCreature && !hasDarkness) {
+      state.playtest.graveyard.push({
+        ...entry,
+        faceDown: false,
+        tapped: false
+      });
+      destroyed.push(entry.card?.name || "Unknown creature");
+      continue;
+    }
+    survivors.push(entry);
+  }
+  state.playtest.battle = survivors;
+  return destroyed;
+}
+
+function closePlaytestCinematicModal() {
+  if (elements.playtestCinematicVideo) {
+    elements.playtestCinematicVideo.pause();
+    elements.playtestCinematicVideo.currentTime = 0;
+  }
+  if (elements.playtestCinematicModal) {
+    elements.playtestCinematicModal.hidden = true;
+  }
+}
+
+function playBallomEvolutionAnimation() {
+  if (!elements.playtestCinematicModal || !elements.playtestCinematicVideo) {
+    return;
+  }
+  const video = elements.playtestCinematicVideo;
+  elements.playtestCinematicModal.hidden = false;
+  video.pause();
+  video.currentTime = 0;
+  video.src = resolveAssetUrl(PLAYTEST_BALLOM_VIDEO_URL);
+  const finish = () => {
+    video.removeEventListener("ended", finish);
+    closePlaytestCinematicModal();
+  };
+  video.addEventListener("ended", finish, { once: true });
+  const playAttempt = video.play();
+  if (playAttempt && typeof playAttempt.catch === "function") {
+    playAttempt.catch(() => {
+      window.setTimeout(closePlaytestCinematicModal, 4500);
+    });
+  }
 }
 
 function isShieldTriggerCard(card) {
@@ -1074,6 +1160,7 @@ function buildPlaytestCard(zoneName, card) {
   if (card.faceDown) {
     const back = document.createElement("span");
     back.className = "playtest-card-back";
+    back.style.background = `linear-gradient(rgba(6, 14, 28, 0.2), rgba(6, 14, 28, 0.6)), url('${playtestCoverImageUrl()}') center / cover no-repeat`;
     const backImage = document.createElement("img");
     backImage.className = "playtest-card-back-image";
     backImage.src = playtestCoverImageUrl();
@@ -1121,6 +1208,7 @@ function renderPlaytestPile() {
     <div class="playtest-deck-stack-top"></div>
   `;
   for (const layer of stack.querySelectorAll(".playtest-deck-stack-card, .playtest-deck-stack-top")) {
+    layer.style.background = `linear-gradient(rgba(6, 14, 28, 0.22), rgba(6, 14, 28, 0.58)), url('${playtestCoverImageUrl()}') center / cover no-repeat`;
     const image = document.createElement("img");
     image.className = "playtest-deck-stack-image";
     image.src = playtestCoverImageUrl();
@@ -1168,6 +1256,26 @@ function ensurePlaytestActionOverlay() {
   overlay.hidden = true;
   document.body.append(overlay);
   elements.playtestActionOverlay = overlay;
+}
+
+function ensurePlaytestCinematicModal() {
+  if (document.querySelector("#playtest-cinematic-modal")) {
+    elements.playtestCinematicModal = document.querySelector("#playtest-cinematic-modal");
+    elements.playtestCinematicVideo = document.querySelector("#playtest-cinematic-video");
+    return;
+  }
+  const wrapper = document.createElement("div");
+  wrapper.innerHTML = `
+    <div id="playtest-cinematic-modal" class="modal-shell playtest-cinematic-shell" hidden>
+      <div class="modal-backdrop playtest-cinematic-backdrop"></div>
+      <section class="playtest-cinematic-panel">
+        <video id="playtest-cinematic-video" class="playtest-cinematic-video" preload="auto" playsinline></video>
+      </section>
+    </div>
+  `;
+  document.body.append(wrapper.firstElementChild);
+  elements.playtestCinematicModal = document.querySelector("#playtest-cinematic-modal");
+  elements.playtestCinematicVideo = document.querySelector("#playtest-cinematic-video");
 }
 
 function renderPlaytestActionOverlay() {
