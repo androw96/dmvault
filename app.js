@@ -373,6 +373,7 @@ function normalizedUsername(username) {
 
 initialize().catch((error) => {
   console.error(error);
+  setBootLoadingState(false);
   setStatus("Paladin's Vault could not finish loading. Please check the backend.", "error");
 });
 
@@ -407,7 +408,11 @@ async function initialize() {
     }
     return;
   }
-  await hydrateProfiles();
+  try {
+    await hydrateProfiles();
+  } catch (error) {
+    console.warn("hydrateProfiles failed", error);
+  }
   renderAuthNavigation();
   renderWelcome();
   renderProfile();
@@ -415,15 +420,37 @@ async function initialize() {
   setBootLoadingState(false);
   hydrateBuilderPreferences();
   maybeLoadLocalDeck();
-  await hydrateDeckCards();
-  await maybeLoadSharedDeck();
-  await maybeLoadBuilderDeckFromQuery();
+  try {
+    await hydrateDeckCards();
+  } catch (error) {
+    console.warn("hydrateDeckCards failed", error);
+  }
+  try {
+    await maybeLoadSharedDeck();
+  } catch (error) {
+    console.warn("maybeLoadSharedDeck failed", error);
+  }
+  try {
+    await maybeLoadBuilderDeckFromQuery();
+  } catch (error) {
+    console.warn("maybeLoadBuilderDeckFromQuery failed", error);
+  }
   maybeStartNewDeckFromQuery();
   maybeOpenImportedDeckFromQuery();
-  if (state.loadedShareId && state.deckHistory.length === 0) {
-    await loadDeckHistory(state.loadedShareId);
-  }
-  await Promise.all([
+  renderWelcome();
+  renderAuthNavigation();
+  renderProfile();
+  renderStatusFromQuery();
+  maybeOpenAccountDeleteFromQuery();
+  renderBuilderDeckOptions();
+  renderBuilderEntry();
+  renderPrintDeckOptions();
+  renderBuilder();
+  renderPrintPages();
+  renderHeaderStats();
+  renderContactPage();
+
+  const backgroundTasks = [
     (async () => {
       if (!needsCards(page)) {
         return;
@@ -441,32 +468,24 @@ async function initialize() {
     page === "profile" ? maybeLoadViewedProfile() : Promise.resolve(),
     isCardDetailPage ? loadCardDetailPage() : Promise.resolve(),
     isHistoryPage ? loadHistoryPage() : Promise.resolve(),
-    isPlaytestPage ? loadPlaytestSandbox() : Promise.resolve(),
-    page === "admin" && state.activeProfileId ? loadAdminOverview() : Promise.resolve()
-  ]);
+    page === "admin" && state.activeProfileId ? loadAdminOverview() : Promise.resolve(),
+    state.loadedShareId && state.deckHistory.length === 0 ? loadDeckHistory(state.loadedShareId) : Promise.resolve()
+  ];
 
-  renderWelcome();
-  renderAuthNavigation();
-  renderNotifications();
-  renderProfile();
-  renderProfileDecks();
-  renderExploreDecks();
-  renderStatusFromQuery();
-  maybeOpenAccountDeleteFromQuery();
-  renderExploreUsers();
-  renderExploreSections();
-  renderAvatarPresetChoosers();
-  renderBuilderDeckOptions();
-  renderBuilderEntry();
-  renderPrintDeckOptions();
-  renderBuilder();
-  renderCards();
-  renderPrintPages();
-  renderDeckHistory();
-  renderPlaytestSandbox();
-  renderHeaderStats();
-  renderAdminPage();
-  renderContactPage();
+  Promise.allSettled(backgroundTasks).then(() => {
+    renderNotifications();
+    renderProfile();
+    renderProfileDecks();
+    renderExploreDecks();
+    renderExploreUsers();
+    renderExploreSections();
+    renderAvatarPresetChoosers();
+    renderCards();
+    renderDeckHistory();
+    renderPlaytestSandbox();
+    renderHeaderStats();
+    renderAdminPage();
+  });
 }
 
 function currentCardDetailId() {
@@ -4217,12 +4236,14 @@ async function loadDeckIntoWorkspace(publicId, options = {}) {
   }
   persistDeckSnapshot();
   markDeckSaved();
-  await loadDeckHistory(payload.public_id);
   renderBuilderEntry();
   renderBuilder();
   renderCards();
   renderPrintPages();
   renderHeaderStats();
+  void loadDeckHistory(payload.public_id).then(() => renderDeckHistory()).catch((error) => {
+    console.warn("loadDeckHistory failed", error);
+  });
   return payload;
 }
 
