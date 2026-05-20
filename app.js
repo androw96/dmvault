@@ -948,7 +948,7 @@ function playtestActionDefinitions(zoneName, card) {
   if (zoneName === "hand") {
     actions.push(
       {
-        label: "Play",
+        label: isEvolutionCard(card.card) ? "Evolve" : "Play",
         run: () => {
           if (isSpellCard(card.card)) {
             if (isChargerSpellCard(card.card)) {
@@ -1008,11 +1008,8 @@ function buildPlaytestCard(zoneName, card) {
   const isEvolutionTarget = zoneName === "battle"
     && state.playtestEvolutionPick
     && state.playtestEvolutionPick.eligibleUids.includes(card.uid);
-  article.classList.toggle("is-tapped", Boolean(card.tapped));
-  article.classList.toggle("is-facedown", Boolean(card.faceDown));
-  article.classList.toggle("is-selected", state.playtestSelected?.uid === card.uid && state.playtestSelected?.zone === zoneName);
-  article.classList.toggle("is-evolution-target", Boolean(isEvolutionTarget));
-  article.addEventListener("click", () => {
+  let pendingClickTimer = null;
+  const toggleSelection = () => {
     if (isEvolutionTarget) {
       completeEvolutionPlay(card.uid);
       return;
@@ -1023,13 +1020,33 @@ function buildPlaytestCard(zoneName, card) {
       state.playtestSelected = { zone: zoneName, uid: card.uid };
     }
     renderPlaytestSandbox();
-  });
-  if (canQuickToggleTap) {
-    article.addEventListener("dblclick", (event) => {
-      event.preventDefault();
-      togglePlaytestTapped(zoneName, card.uid);
-    });
-  }
+  };
+  const handleCardClick = () => {
+    if (!canQuickToggleTap) {
+      toggleSelection();
+      return;
+    }
+    window.clearTimeout(pendingClickTimer);
+    pendingClickTimer = window.setTimeout(() => {
+      pendingClickTimer = null;
+      toggleSelection();
+    }, 220);
+  };
+  const handleCardDoubleClick = (event) => {
+    if (!canQuickToggleTap) {
+      return;
+    }
+    event.preventDefault();
+    window.clearTimeout(pendingClickTimer);
+    pendingClickTimer = null;
+    togglePlaytestTapped(zoneName, card.uid);
+  };
+  article.classList.toggle("is-tapped", Boolean(card.tapped));
+  article.classList.toggle("is-facedown", Boolean(card.faceDown));
+  article.classList.toggle("is-selected", state.playtestSelected?.uid === card.uid && state.playtestSelected?.zone === zoneName);
+  article.classList.toggle("is-evolution-target", Boolean(isEvolutionTarget));
+  article.addEventListener("click", handleCardClick);
+  article.addEventListener("dblclick", handleCardDoubleClick);
 
   const imageButton = document.createElement("button");
   imageButton.type = "button";
@@ -1038,7 +1055,13 @@ function buildPlaytestCard(zoneName, card) {
   if (card.faceDown) {
     const back = document.createElement("span");
     back.className = "playtest-card-back";
-    back.style.background = `linear-gradient(rgba(6, 14, 28, 0.2), rgba(6, 14, 28, 0.6)), url('${playtestCoverImageUrl()}') center / cover no-repeat`;
+    const backImage = document.createElement("img");
+    backImage.className = "playtest-card-back-image";
+    backImage.src = playtestCoverImageUrl();
+    backImage.alt = "Card back";
+    backImage.loading = "eager";
+    backImage.decoding = "async";
+    back.append(backImage);
     imageButton.append(back);
   } else {
     const image = document.createElement("img");
@@ -1051,24 +1074,12 @@ function buildPlaytestCard(zoneName, card) {
   }
   imageButton.addEventListener("click", (event) => {
     event.stopPropagation();
-    if (isEvolutionTarget) {
-      completeEvolutionPlay(card.uid);
-      return;
-    }
-    if (state.playtestSelected?.uid === card.uid && state.playtestSelected?.zone === zoneName) {
-      state.playtestSelected = null;
-    } else {
-      state.playtestSelected = { zone: zoneName, uid: card.uid };
-    }
-    renderPlaytestSandbox();
+    handleCardClick();
   });
-  if (canQuickToggleTap) {
-    imageButton.addEventListener("dblclick", (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      togglePlaytestTapped(zoneName, card.uid);
-    });
-  }
+  imageButton.addEventListener("dblclick", (event) => {
+    event.stopPropagation();
+    handleCardDoubleClick(event);
+  });
   article.append(imageButton);
   return article;
 }
@@ -1091,7 +1102,13 @@ function renderPlaytestPile() {
     <div class="playtest-deck-stack-top"></div>
   `;
   for (const layer of stack.querySelectorAll(".playtest-deck-stack-card, .playtest-deck-stack-top")) {
-    layer.style.background = `linear-gradient(rgba(6, 14, 28, 0.22), rgba(6, 14, 28, 0.58)), url('${playtestCoverImageUrl()}') center / cover no-repeat`;
+    const image = document.createElement("img");
+    image.className = "playtest-deck-stack-image";
+    image.src = playtestCoverImageUrl();
+    image.alt = "Library card back";
+    image.loading = "eager";
+    image.decoding = "async";
+    layer.append(image);
   }
   if (pile.length) {
     stack.addEventListener("click", () => {
@@ -1141,6 +1158,7 @@ function renderPlaytestActionOverlay() {
   const overlay = elements.playtestActionOverlay;
   overlay.replaceChildren();
   overlay.hidden = true;
+  overlay.style.visibility = "hidden";
   if (!state.playtestSelected) {
     return;
   }

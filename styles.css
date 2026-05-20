@@ -2590,6 +2590,15 @@ body[data-page="playtest"] .page-stack {
   min-height: 38px;
   padding: 8px 12px;
   width: 100%;
+  display: block;
+  color: #f3fbff;
+  text-align: center;
+  background:
+    linear-gradient(145deg, rgba(255, 255, 255, 0.09), transparent 34%),
+    rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(129, 215, 255, 0.18);
+  box-shadow: none;
+  transform: none !important;
 }
 
 body[data-page="playtest"] .playtest-card,
@@ -2734,6 +2743,16 @@ body[data-page="playtest"] .playtest-battle-zone-shell {
 .playtest-card-back {
   position: relative;
   overflow: hidden;
+}
+
+.playtest-card-back-image,
+.playtest-deck-stack-image {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
 }
 
 .workspace-grid {
