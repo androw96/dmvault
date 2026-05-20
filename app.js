@@ -10,7 +10,8 @@ const AVATAR_PRESETS = {
   Darkness: ["Marrow Ooze, the Twister", "Propeller Mutant", "Phantasmal Horror Gigazald", "Deathliger, Lion of Chaos", "Ballom, Master of Death", "Super Necrodragon Abzo Dolba"],
   Light: ["La Ura Giga", "Sarius, Vizier of Suppression", "Craze Valkyrie, the Drastic", "Urth, Purifying Elemental", "Miar, Comet Elemental", "Alcadeias, Lord of Spirits"],
   Nature: ["Bronze-Arm Tribe", "Quixotic Hero Swine Snout", "Charmilia, the Enticer", "Super Terradragon Bailas Gale", "Fighter Dual Fang"],
-  Fire: ["Deadly Fighter Braid Claw", "Brawler Zyler", "Armored Blaster Valdios", "Bolshack Dragon", "Bolmeteus Steel Dragon", "Billion-Degree Dragon"]
+  Fire: ["Deadly Fighter Braid Claw", "Brawler Zyler", "Armored Blaster Valdios", "Bolshack Dragon", "Bolmeteus Steel Dragon", "Billion-Degree Dragon"],
+  Multicivilization: ["Bombazar, Dragon of Destiny", "Death Phoenix, Avatar of Doom", "Wise Starnoid, Avatar of Hope", "Aura Pegasus, Avatar of Life", "Aura Phoenix, Avatar of Destiny"]
 };
 const AVATAR_PRESET_FOCUS = {
   "aqua guard": { x: 50, y: 24, zoom: 205 },
@@ -41,7 +42,12 @@ const AVATAR_PRESET_FOCUS = {
   "armored blaster valdios": { x: 50, y: 20, zoom: 245 },
   "bolshack dragon": { x: 50, y: 20, zoom: 245 },
   "bolmeteus steel dragon": { x: 50, y: 21, zoom: 212 },
-  "billion degree dragon": { x: 50, y: 20, zoom: 245 }
+  "billion degree dragon": { x: 50, y: 20, zoom: 245 },
+  "bombazar dragon of destiny": { x: 50, y: 19, zoom: 248 },
+  "death phoenix avatar of doom": { x: 50, y: 19, zoom: 248 },
+  "wise starnoid avatar of hope": { x: 50, y: 21, zoom: 240 },
+  "aura pegasus avatar of life": { x: 50, y: 20, zoom: 244 },
+  "aura phoenix avatar of destiny": { x: 50, y: 19, zoom: 246 }
 };
 
 const page = document.body.dataset.page ?? "welcome";
@@ -364,6 +370,7 @@ initialize().catch((error) => {
 });
 
 async function initialize() {
+  setBootLoadingState(true);
   ensureDeckDeleteModal();
   ensureAccountDeleteModal();
   ensureExportModal();
@@ -375,6 +382,11 @@ async function initialize() {
   setActiveNav();
   bindEvents();
   await hydrateProfiles();
+  renderAuthNavigation();
+  renderWelcome();
+  renderProfile();
+  renderContactPage();
+  setBootLoadingState(false);
   hydrateBuilderPreferences();
   maybeLoadLocalDeck();
   await hydrateDeckCards();
@@ -385,42 +397,27 @@ async function initialize() {
   if (state.loadedShareId && state.deckHistory.length === 0) {
     await loadDeckHistory(state.loadedShareId);
   }
-
-  if (needsCards(page)) {
-    await hydrateFilters();
-    const shouldPreloadCards = !isDeckEditorPage || state.filters.search || state.filters.civilization !== "all" || state.filters.type !== "all" || state.filters.maxCost !== state.filterDefaults.maxCost;
-    if (shouldPreloadCards) {
-      await loadCards(isDeckEditorPage ? 60 : 160);
-    }
-  }
-  if (page === "profile") {
-    await loadAllCards();
-  }
-
-  if (needsProfileDecks(page) && state.activeProfileId) {
-    await loadProfileDecks(state.activeProfileId);
-  }
-  if (state.activeProfileId) {
-    await loadNotifications();
-  }
-  if (needsExploreDecks(page)) {
-    await loadExploreDecks();
-  }
-  if (page === "profile") {
-    await maybeLoadViewedProfile();
-  }
-  if (isCardDetailPage) {
-    await loadCardDetailPage();
-  }
-  if (isHistoryPage) {
-    await loadHistoryPage();
-  }
-  if (isPlaytestPage) {
-    await loadPlaytestSandbox();
-  }
-  if (page === "admin" && state.activeProfileId) {
-    await loadAdminOverview();
-  }
+  await Promise.all([
+    (async () => {
+      if (!needsCards(page)) {
+        return;
+      }
+      await hydrateFilters();
+      const shouldPreloadCards = !isDeckEditorPage || state.filters.search || state.filters.civilization !== "all" || state.filters.type !== "all" || state.filters.maxCost !== state.filterDefaults.maxCost;
+      if (shouldPreloadCards) {
+        await loadCards(isDeckEditorPage ? 60 : 160);
+      }
+    })(),
+    page === "profile" ? loadAllCards() : Promise.resolve(),
+    needsProfileDecks(page) && state.activeProfileId ? loadProfileDecks(state.activeProfileId) : Promise.resolve(),
+    state.activeProfileId ? loadNotifications() : Promise.resolve(),
+    needsExploreDecks(page) ? loadExploreDecks() : Promise.resolve(),
+    page === "profile" ? maybeLoadViewedProfile() : Promise.resolve(),
+    isCardDetailPage ? loadCardDetailPage() : Promise.resolve(),
+    isHistoryPage ? loadHistoryPage() : Promise.resolve(),
+    isPlaytestPage ? loadPlaytestSandbox() : Promise.resolve(),
+    page === "admin" && state.activeProfileId ? loadAdminOverview() : Promise.resolve()
+  ]);
 
   renderWelcome();
   renderAuthNavigation();
@@ -567,6 +564,10 @@ function playtestSourceCardChoices() {
     seen.add(card.id);
     return true;
   });
+}
+
+function playtestCoverImageUrl() {
+  return resolveAssetUrl(state.playtest.coverImage || state.deckCoverImageUrl || deriveAutomaticDeckCover() || DEFAULT_LOGO_URL);
 }
 
 async function ensureDeckCardsHydratedForPlaytest() {
@@ -810,7 +811,13 @@ function buildPlaytestCard(zoneName, card) {
   imageButton.className = "playtest-card-image-button";
   imageButton.setAttribute("aria-label", card.faceDown ? "Hidden shield card" : card.card.name);
   if (card.faceDown) {
-    imageButton.innerHTML = `<span class="playtest-card-back">Shield</span>`;
+    const back = document.createElement("span");
+    back.className = "playtest-card-back";
+    back.style.backgroundImage = `linear-gradient(rgba(6, 14, 28, 0.2), rgba(6, 14, 28, 0.6)), url('${playtestCoverImageUrl()}')`;
+    back.style.backgroundSize = "cover";
+    back.style.backgroundPosition = "center";
+    back.textContent = "Shield";
+    imageButton.append(back);
   } else {
     const image = document.createElement("img");
     image.className = "playtest-card-image";
@@ -867,6 +874,12 @@ function renderPlaytestPile() {
     <div class="playtest-deck-stack-card"></div>
     <div class="playtest-deck-stack-top"></div>
   `;
+  const deckTop = stack.querySelector(".playtest-deck-stack-top");
+  if (deckTop) {
+    deckTop.style.backgroundImage = `linear-gradient(rgba(6, 14, 28, 0.22), rgba(6, 14, 28, 0.58)), url('${playtestCoverImageUrl()}')`;
+    deckTop.style.backgroundSize = "cover";
+    deckTop.style.backgroundPosition = "center";
+  }
   if (pile.length) {
     stack.addEventListener("click", () => drawPlaytestCards(1));
     stack.addEventListener("keydown", (event) => {
@@ -2130,6 +2143,10 @@ function ensureExportModal() {
   for (const target of elements.exportProgressCloseTargets) {
     target.addEventListener("click", closeExportModal);
   }
+}
+
+function setBootLoadingState(isLoading) {
+  document.body.classList.toggle("app-boot-loading", isLoading);
 }
 
 function openExportModal(title, message, percent = 0) {

@@ -456,6 +456,16 @@ h3 {
     radial-gradient(circle at left center, rgba(131, 235, 255, 0.12), transparent 30%);
 }
 
+body.app-boot-loading [data-login-nav],
+body.app-boot-loading [data-signup-nav],
+body.app-boot-loading [data-logout-nav],
+body.app-boot-loading [data-auth-logged-in],
+body.app-boot-loading [data-auth-logged-out],
+body.app-boot-loading .profile-menu,
+body.app-boot-loading .notification-menu {
+  visibility: hidden;
+}
+
 .top-nav-links {
   display: flex;
   flex-wrap: wrap;
@@ -1787,7 +1797,7 @@ textarea:focus {
   border-radius: 24px;
   border: 1px solid rgba(255, 255, 255, 0.08);
   background: linear-gradient(180deg, rgba(38, 40, 44, 0.92), rgba(28, 29, 32, 0.96));
-  overflow: hidden;
+  overflow: visible;
 }
 
 .playtest-battlefield-grid {
@@ -1809,6 +1819,7 @@ textarea:focus {
 .playtest-pile-shell {
   position: relative;
   z-index: 1;
+  overflow: visible;
 }
 
 .playtest-inline-zone-header {
@@ -1843,11 +1854,16 @@ textarea:focus {
   display: flex;
   gap: 12px;
   overflow-x: auto;
+  overflow-y: visible;
   padding-bottom: 4px;
+  position: relative;
+  z-index: 5;
 }
 
 .playtest-inline-card-row > * {
   flex: 0 0 auto;
+  position: relative;
+  z-index: 1;
 }
 
 .playtest-inline-card-row-hand > * {
@@ -2465,6 +2481,11 @@ body[data-page="playtest"] .page-stack {
   background: transparent;
   border: none;
   justify-items: center;
+  z-index: 1;
+}
+
+.playtest-card.is-selected {
+  z-index: 200;
 }
 
 .playtest-card.is-selected .playtest-card-image,
@@ -2517,6 +2538,8 @@ body[data-page="playtest"] .page-stack {
 }
 
 .playtest-card-actions {
+  position: relative;
+  z-index: 210;
   display: flex;
   flex-wrap: wrap;
   justify-content: center;
