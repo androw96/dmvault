@@ -338,6 +338,7 @@ const elements = {
   playtestBattleZone: document.querySelector("#playtest-battle-zone"),
   playtestManaZone: document.querySelector("#playtest-mana-zone"),
   playtestGraveyardZone: document.querySelector("#playtest-graveyard-zone"),
+  playtestActionOverlay: null,
   playtestLibraryModal: null,
   playtestLibrarySearchInput: null,
   playtestLibrarySearchResults: null,
@@ -380,6 +381,7 @@ async function initialize() {
   ensureExportModal();
   ensureAdminMonthModal();
   ensureAuthModalEnhancements();
+  ensurePlaytestActionOverlay();
   ensurePlaytestLibraryModal();
   ensureNotificationMenu();
   ensureMobileNavToggle();
@@ -908,6 +910,7 @@ function buildPlaytestCard(zoneName, card) {
   const article = document.createElement("article");
   article.className = "playtest-card";
   article.dataset.zone = zoneName;
+  article.dataset.uid = card.uid;
   article.classList.toggle("is-tapped", Boolean(card.tapped));
   article.classList.toggle("is-facedown", Boolean(card.faceDown));
   article.classList.toggle("is-selected", state.playtestSelected?.uid === card.uid && state.playtestSelected?.zone === zoneName);
@@ -948,23 +951,6 @@ function buildPlaytestCard(zoneName, card) {
     renderPlaytestSandbox();
   });
   article.append(imageButton);
-
-  if (state.playtestSelected?.uid === card.uid && state.playtestSelected?.zone === zoneName) {
-    const actions = document.createElement("div");
-    actions.className = "playtest-card-actions";
-    for (const action of playtestActionDefinitions(zoneName, card)) {
-      const button = document.createElement("button");
-      button.type = "button";
-      button.className = action.tone === "ghost" ? "small-button ghost-button" : "small-button";
-      button.textContent = action.label;
-      button.addEventListener("click", (event) => {
-        event.stopPropagation();
-        action.run();
-      });
-      actions.append(button);
-    }
-    article.append(actions);
-  }
   return article;
 }
 
@@ -979,7 +965,7 @@ function renderPlaytestPile() {
   stack.className = "playtest-deck-stack";
   stack.setAttribute("role", "button");
   stack.tabIndex = pile.length ? 0 : -1;
-  stack.setAttribute("aria-label", pile.length ? "Draw a card" : "Library is empty");
+  stack.setAttribute("aria-label", pile.length ? "Open library actions" : "Library is empty");
   stack.innerHTML = `
     <div class="playtest-deck-stack-card"></div>
     <div class="playtest-deck-stack-card"></div>
@@ -989,35 +975,99 @@ function renderPlaytestPile() {
     layer.style.background = `linear-gradient(rgba(6, 14, 28, 0.22), rgba(6, 14, 28, 0.58)), url('${playtestCoverImageUrl()}') center / cover no-repeat`;
   }
   if (pile.length) {
-    stack.addEventListener("click", () => drawPlaytestCards(1));
+    stack.addEventListener("click", () => {
+      if (state.playtestSelected?.zone === "drawPile") {
+        state.playtestSelected = null;
+      } else {
+        state.playtestSelected = { zone: "drawPile", uid: "library" };
+      }
+      renderPlaytestSandbox();
+    });
     stack.addEventListener("keydown", (event) => {
       if (event.key === "Enter" || event.key === " ") {
         event.preventDefault();
-        drawPlaytestCards(1);
+        if (state.playtestSelected?.zone === "drawPile") {
+          state.playtestSelected = null;
+        } else {
+          state.playtestSelected = { zone: "drawPile", uid: "library" };
+        }
+        renderPlaytestSandbox();
       }
     });
   }
   zone.append(stack);
-  const actions = document.createElement("div");
-  actions.className = "playtest-pile-actions";
-  const drawButton = document.createElement("button");
-  drawButton.type = "button";
-  drawButton.className = "small-button";
-  drawButton.textContent = "Draw";
-  drawButton.disabled = !pile.length;
-  drawButton.addEventListener("click", () => drawPlaytestCards(1));
-  const searchButton = document.createElement("button");
-  searchButton.type = "button";
-  searchButton.className = "small-button ghost-button";
-  searchButton.textContent = "Search";
-  searchButton.disabled = !pile.length;
-  searchButton.addEventListener("click", openPlaytestLibrarySearch);
-  actions.append(drawButton, searchButton);
-  zone.append(actions);
   const meta = document.createElement("div");
   meta.className = "playtest-pile-meta";
   meta.innerHTML = `<strong>${pile.length} cards</strong>`;
   zone.append(meta);
+}
+
+function ensurePlaytestActionOverlay() {
+  if (elements.playtestActionOverlay || document.querySelector("#playtest-action-overlay")) {
+    elements.playtestActionOverlay = document.querySelector("#playtest-action-overlay");
+    return;
+  }
+  const overlay = document.createElement("div");
+  overlay.id = "playtest-action-overlay";
+  overlay.className = "playtest-action-overlay";
+  overlay.hidden = true;
+  document.body.append(overlay);
+  elements.playtestActionOverlay = overlay;
+}
+
+function renderPlaytestActionOverlay() {
+  if (!elements.playtestActionOverlay) {
+    return;
+  }
+  const overlay = elements.playtestActionOverlay;
+  overlay.replaceChildren();
+  overlay.hidden = true;
+  if (!state.playtestSelected) {
+    return;
+  }
+  let anchor = null;
+  let actions = [];
+  if (state.playtestSelected.zone === "drawPile") {
+    anchor = elements.playtestDrawPileZone?.querySelector(".playtest-deck-stack");
+    actions = [
+      { label: "Draw", tone: "default", run: () => drawPlaytestCards(1) },
+      { label: "Search", tone: "ghost", run: () => openPlaytestLibrarySearch() }
+    ];
+  } else {
+    const zoneName = state.playtestSelected.zone;
+    const card = (state.playtest[zoneName] || []).find((entry) => entry.uid === state.playtestSelected?.uid);
+    if (!card) {
+      state.playtestSelected = null;
+      return;
+    }
+    anchor = document.querySelector(`.playtest-card[data-zone="${zoneName}"][data-uid="${card.uid}"]`);
+    actions = playtestActionDefinitions(zoneName, card);
+  }
+  if (!anchor || !actions.length) {
+    return;
+  }
+  const rect = anchor.getBoundingClientRect();
+  overlay.classList.toggle("is-below", state.playtestSelected.zone === "hand" || state.playtestSelected.zone === "shields");
+  const top = state.playtestSelected.zone === "hand" || state.playtestSelected.zone === "shields"
+    ? rect.bottom + 10
+    : rect.top + rect.height / 2;
+  const left = state.playtestSelected.zone === "hand" || state.playtestSelected.zone === "shields"
+    ? rect.left + rect.width / 2
+    : rect.right + 12;
+  overlay.style.top = `${top}px`;
+  overlay.style.left = `${left}px`;
+  for (const action of actions) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = action.tone === "ghost" ? "small-button ghost-button" : "small-button";
+    button.textContent = action.label;
+    button.addEventListener("click", (event) => {
+      event.stopPropagation();
+      action.run();
+    });
+    overlay.append(button);
+  }
+  overlay.hidden = false;
 }
 
 function renderPlaytestZone(zoneName, container) {
@@ -1076,6 +1126,7 @@ function renderPlaytestSandbox() {
   renderPlaytestZone("battle", elements.playtestBattleZone);
   renderPlaytestZone("mana", elements.playtestManaZone);
   renderPlaytestZone("graveyard", elements.playtestGraveyardZone);
+  renderPlaytestActionOverlay();
 }
 
 async function loadPlaytestSandbox() {
@@ -3773,6 +3824,17 @@ function positionDropdownMenu(summary, menu, alignRight = false) {
 }
 
 function handleDocumentClick(event) {
+  if (
+    state.playtestSelected
+    && elements.playtestActionOverlay
+    && !elements.playtestActionOverlay.hidden
+    && !elements.playtestActionOverlay.contains(event.target)
+    && !event.target.closest(".playtest-card")
+    && !event.target.closest(".playtest-deck-stack")
+  ) {
+    state.playtestSelected = null;
+    renderPlaytestSandbox();
+  }
   if (
     elements.playtestSearchResults
     && !elements.playtestSearchResults.contains(event.target)

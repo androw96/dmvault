@@ -1948,15 +1948,7 @@ textarea:focus {
 }
 
 .playtest-card-actions {
-  position: absolute;
-  top: 50%;
-  left: calc(100% + 12px);
-  transform: translateY(-50%);
-  z-index: 210;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  width: max-content;
+  display: none;
 }
 
 .playtest-pile-stack {
@@ -2517,25 +2509,6 @@ body[data-page="playtest"] .page-stack {
   z-index: 200;
 }
 
-.playtest-card[data-zone="hand"] .playtest-card-actions,
-.playtest-card[data-zone="shields"] .playtest-card-actions {
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-}
-
-.playtest-card[data-zone="battle"] .playtest-card-actions,
-.playtest-card[data-zone="mana"] .playtest-card-actions {
-  top: 50%;
-  left: calc(100% + 10px);
-  transform: translateY(-50%);
-  display: flex !important;
-  flex-direction: column !important;
-  flex-wrap: nowrap !important;
-  align-items: stretch !important;
-  width: 148px !important;
-}
-
 .playtest-card.is-selected .playtest-card-image,
 .playtest-card.is-selected .playtest-card-back {
   box-shadow:
@@ -2585,25 +2558,23 @@ body[data-page="playtest"] .page-stack {
   gap: 16px;
 }
 
-.playtest-card-actions {
-  position: absolute;
-  top: 50%;
-  left: calc(100% + 12px);
-  transform: translateY(-50%);
-  z-index: 210;
+.playtest-action-overlay {
+  position: fixed;
+  z-index: 2147483647;
   display: flex;
   flex-direction: column;
   gap: 8px;
-  width: max-content;
+  width: 156px;
+  transform: translateY(-50%);
 }
 
-.playtest-card-actions .small-button {
+.playtest-action-overlay.is-below {
+  transform: translateX(-50%);
+}
+
+.playtest-action-overlay .small-button {
   min-height: 38px;
   padding: 8px 12px;
-}
-
-.playtest-card[data-zone="battle"] .playtest-card-actions .small-button,
-.playtest-card[data-zone="mana"] .playtest-card-actions .small-button {
   width: 100%;
 }
 
