@@ -1875,20 +1875,20 @@ textarea:focus {
 }
 
 .playtest-card {
+  position: relative;
   display: grid;
-  grid-template-columns: 110px 1fr;
-  gap: 12px;
+  gap: 8px;
   align-items: start;
-  padding: 12px;
+  padding: 0;
   border-radius: 20px;
-  border: 1px solid rgba(157, 213, 255, 0.14);
-  background: rgba(12, 22, 33, 0.5);
+  border: none;
+  background: transparent;
   transition: transform 180ms ease, border-color 180ms ease;
+  justify-items: center;
 }
 
 .playtest-card:hover {
   transform: translateY(-1px);
-  border-color: rgba(157, 213, 255, 0.28);
 }
 
 .playtest-card.is-tapped {
@@ -1948,9 +1948,15 @@ textarea:focus {
 }
 
 .playtest-card-actions {
+  position: absolute;
+  top: 50%;
+  left: calc(100% + 12px);
+  transform: translateY(-50%);
+  z-index: 210;
   display: flex;
-  flex-wrap: wrap;
+  flex-direction: column;
   gap: 8px;
+  width: max-content;
 }
 
 .playtest-pile-stack {
@@ -1998,6 +2004,16 @@ textarea:focus {
   gap: 4px;
   margin-top: 12px;
   text-align: left;
+}
+
+.playtest-pile-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.playtest-pile-actions .small-button {
+  flex: 1 1 0;
 }
 
 .playtest-pile-meta span {
@@ -2293,6 +2309,13 @@ body[data-page="playtest"] .page-stack {
   box-shadow: 0 22px 40px rgba(0, 0, 0, 0.35);
 }
 
+.playtest-search-results-static {
+  position: static;
+  margin-top: 14px;
+  max-height: 360px;
+  overflow: auto;
+}
+
 .playtest-search-result {
   display: grid;
   gap: 4px;
@@ -2488,6 +2511,20 @@ body[data-page="playtest"] .page-stack {
   z-index: 200;
 }
 
+.playtest-card[data-zone="hand"] .playtest-card-actions,
+.playtest-card[data-zone="shields"] .playtest-card-actions {
+  top: calc(100% + 10px);
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.playtest-card[data-zone="battle"] .playtest-card-actions,
+.playtest-card[data-zone="mana"] .playtest-card-actions {
+  top: 50%;
+  left: calc(100% + 10px);
+  transform: translateY(-50%);
+}
+
 .playtest-card.is-selected .playtest-card-image,
 .playtest-card.is-selected .playtest-card-back {
   box-shadow:
@@ -2538,13 +2575,15 @@ body[data-page="playtest"] .page-stack {
 }
 
 .playtest-card-actions {
-  position: relative;
+  position: absolute;
+  top: 50%;
+  left: calc(100% + 12px);
+  transform: translateY(-50%);
   z-index: 210;
   display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
+  flex-direction: column;
   gap: 8px;
-  width: min(240px, 100%);
+  width: max-content;
 }
 
 .playtest-card-actions .small-button {
