@@ -149,7 +149,7 @@ const elements = {
   builderEntryPanel: document.querySelector("#builder-entry-panel"),
   builderEntryStatus: document.querySelector("#builder-entry-status"),
   builderEditorSections: [...document.querySelectorAll("[data-builder-editor]")],
-  adminTestPlayPanels: [...document.querySelectorAll(".admin-test-play-panel")],
+  deckTestingPanels: [...document.querySelectorAll(".deck-testing-panel")],
   newDeckButton: document.querySelector("#new-deck-button"),
   modifyDeckButton: document.querySelector("#modify-deck-button"),
   modifyDeckPanel: document.querySelector("#modify-deck-panel"),
@@ -158,6 +158,7 @@ const elements = {
   cancelModifyDeckButton: document.querySelector("#cancel-modify-deck-button"),
   exportSelect: document.querySelector("#export-select"),
   openPlaytestButton: document.querySelector("#open-playtest-button"),
+  openAdminPlaytestButton: document.querySelector("#open-admin-playtest-button"),
   openPlaymodePageButton: document.querySelector("#open-playmode-page-button"),
   builderViewSelect: document.querySelector("#builder-view-select"),
   deckCoverSelect: document.querySelector("#deck-cover-select"),
@@ -344,7 +345,6 @@ const elements = {
   playtestManaCount: document.querySelector("#playtest-mana-count"),
   playtestGraveCount: document.querySelector("#playtest-grave-count"),
   playtestEmpty: document.querySelector("#playtest-empty"),
-  playtestAdminLocked: document.querySelector("#playtest-admin-locked"),
   playtestBoard: document.querySelector("#playtest-board"),
   playtestDrawPileZone: document.querySelector("#playtest-draw-pile-zone"),
   playtestShieldsZone: document.querySelector("#playtest-shields-zone"),
@@ -1655,11 +1655,6 @@ function renderPlaytestSandbox() {
   if (!isPlaytestPage) {
     return;
   }
-  const isAdmin = Boolean(activeProfile()?.is_admin);
-  if (!isAdmin) {
-    renderTestPlayAccess();
-    return;
-  }
   const hasSource = (state.playtest.sourceCards || []).length > 0;
   if (elements.playtestEmpty) {
     elements.playtestEmpty.hidden = hasSource;
@@ -1931,10 +1926,6 @@ async function joinCurrentPlaymodeMatch() {
 }
 
 async function loadPlaytestSandbox() {
-  if (!activeProfile()?.is_admin) {
-    renderTestPlayAccess();
-    return;
-  }
   let payload = null;
   try {
     payload = JSON.parse(window.sessionStorage.getItem(PLAYTEST_STORAGE_KEY) || "null");
@@ -1984,10 +1975,6 @@ async function loadHistoryPage() {
 }
 
 async function openPlaytestSandbox() {
-  if (!state.activeProfileId || !activeProfile()?.is_admin) {
-    setStatus("Test Play is only available for the admin profile.", "error");
-    return;
-  }
   if (totalDeckCards() === 0) {
     setStatus("Build a deck first, then open the playtest sandbox.", "error");
     return;
@@ -2461,6 +2448,9 @@ function bindEvents() {
   window.addEventListener("scroll", repositionOpenNavDropdowns, true);
   elements.exportSelect?.addEventListener("change", handleExportSelection);
   elements.openPlaytestButton?.addEventListener("click", () => {
+    void openPlaytestSandbox();
+  });
+  elements.openAdminPlaytestButton?.addEventListener("click", () => {
     void openPlaytestSandbox();
   });
   elements.openPlaymodePageButton?.addEventListener("click", () => {
@@ -3126,20 +3116,11 @@ function renderAuthNavigation() {
 
 function renderTestPlayAccess() {
   const isAdmin = Boolean(activeProfile()?.is_admin);
-  for (const panel of elements.adminTestPlayPanels || []) {
-    panel.hidden = !isAdmin;
+  for (const panel of elements.deckTestingPanels || []) {
+    panel.hidden = false;
   }
-  if (!isPlaytestPage) {
-    return;
-  }
-  if (elements.playtestAdminLocked) {
-    elements.playtestAdminLocked.hidden = isAdmin;
-  }
-  if (elements.playtestEmpty && !isAdmin) {
-    elements.playtestEmpty.hidden = true;
-  }
-  if (elements.playtestBoard) {
-    elements.playtestBoard.hidden = !isAdmin;
+  if (elements.openAdminPlaytestButton) {
+    elements.openAdminPlaytestButton.hidden = !isAdmin;
   }
 }
 

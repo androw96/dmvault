@@ -4316,6 +4316,7 @@ input[type="range"] {
   .welcome-actions .ghost-button,
   .builder-entry-button,
   .hero-actions .primary-button,
+  .hero-actions .danger-button,
   .hero-actions .ghost-button,
   .profile-inline-button,
   .cookie-consent-actions .primary-button,
@@ -4343,6 +4344,7 @@ input[type="range"] {
   .field textarea,
   button,
   .primary-button,
+  .danger-button,
   .ghost-button,
   .nav-link {
     font-size: 16px;
@@ -4845,6 +4847,7 @@ input[type="range"] {
   }
 
   .deck-owner-actions .primary-button,
+  .deck-owner-actions .danger-button,
   .deck-owner-actions .like-button {
     width: 100%;
   }
