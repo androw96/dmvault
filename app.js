@@ -1,6 +1,7 @@
 const API_BASE = "/api";
 const LOCAL_STORAGE_KEY = "paladins-vault-local-deck";
 const PLAYTEST_STORAGE_KEY = "paladins-vault-playtest-session";
+const PLAYTEST_STORAGE_BACKUP_KEY = "paladins-vault-playtest-session-backup";
 const PROFILE_STORAGE_KEY = "paladins-vault-active-profile";
 const BUILDER_PREFS_KEY = "paladins-vault-builder-prefs";
 const COOKIE_CONSENT_KEY = "paladins-vault-cookie-consent";
@@ -450,9 +451,19 @@ async function initialize() {
   } catch (error) {
     console.warn("hydrateProfiles failed", error);
   }
+  if ((page === "profile" || page === "my-decks") && state.activeProfileId) {
+    try {
+      await loadProfileDecks(state.activeProfileId);
+    } catch (error) {
+      console.warn("loadProfileDecks failed", error);
+    }
+  }
   renderAuthNavigation();
   renderWelcome();
   renderProfile();
+  if (page === "my-decks") {
+    renderProfileDecks();
+  }
   renderContactPage();
   setBootLoadingState(false);
   hydrateBuilderPreferences();
@@ -633,6 +644,9 @@ function emptyPlaytestState(title = "Playtest Sandbox", sourceCards = [], option
 function persistPlaytestState() {
   try {
     window.sessionStorage.setItem(PLAYTEST_STORAGE_KEY, JSON.stringify(state.playtest));
+  } catch {}
+  try {
+    window.localStorage.setItem(PLAYTEST_STORAGE_BACKUP_KEY, JSON.stringify(state.playtest));
   } catch {}
 }
 
@@ -927,6 +941,9 @@ function hardRestartPlaytestGame() {
   restartPlaytestGame();
   try {
     window.sessionStorage.setItem(PLAYTEST_STORAGE_KEY, JSON.stringify(state.playtest));
+  } catch {}
+  try {
+    window.localStorage.setItem(PLAYTEST_STORAGE_BACKUP_KEY, JSON.stringify(state.playtest));
   } catch {}
   window.location.reload();
 }
@@ -1932,6 +1949,13 @@ async function loadPlaytestSandbox() {
   } catch {
     payload = null;
   }
+  if (!payload || !(payload.sourceCards || []).length) {
+    try {
+      payload = JSON.parse(window.localStorage.getItem(PLAYTEST_STORAGE_BACKUP_KEY) || "null");
+    } catch {
+      payload = null;
+    }
+  }
   if ((!payload || !(payload.sourceCards || []).length) && window.location.protocol !== "file:") {
     const deckId = new URLSearchParams(window.location.search).get("deck");
     if (deckId) {
@@ -2304,12 +2328,12 @@ function ensurePlaymodeNavLink() {
   }
   const existing = navLinks.querySelector("[data-playmode-top-link]");
   if (existing) {
-    existing.href = "/playmode";
+    existing.href = playmodePagePath();
     return;
   }
   const link = document.createElement("a");
   link.className = "nav-link";
-  link.href = "/playmode";
+  link.href = playmodePagePath();
   link.dataset.routeLink = "playmode";
   link.dataset.playmodeTopLink = "true";
   link.textContent = "Play Mode";
@@ -3486,16 +3510,17 @@ function renderProfile() {
     return;
   }
 
-  const profile = state.viewedProfile ?? state.activeProfileDetail ?? activeProfile();
+  const viewedProfile = page === "profile" ? state.viewedProfile : null;
+  const profile = viewedProfile ?? state.activeProfileDetail ?? activeProfile();
   const ownProfile = activeProfile();
-  const viewingOtherProfile = Boolean(state.viewedProfile && ownProfile && state.viewedProfile.id !== ownProfile.id);
-  const isPublicProfileView = Boolean(state.viewedProfile) && (!ownProfile || state.viewedProfile.id !== ownProfile.id);
+  const viewingOtherProfile = Boolean(viewedProfile && ownProfile && viewedProfile.id !== ownProfile.id);
+  const isPublicProfileView = Boolean(viewedProfile) && (!ownProfile || viewedProfile.id !== ownProfile.id);
   document.querySelector(".profile-panel")?.classList.toggle("public-profile-view", isPublicProfileView);
   for (const section of elements.authLoggedOutSections) {
     section.hidden = Boolean(ownProfile);
   }
   for (const section of elements.authLoggedInSections) {
-    section.hidden = !ownProfile || Boolean(state.viewedProfile);
+    section.hidden = !ownProfile || Boolean(viewedProfile);
   }
 
   if (!profile) {
@@ -3539,7 +3564,7 @@ function renderProfile() {
     : (profile.email_verified
       ? "Paladin's Vault profile ready for deck building."
       : "Verify your email to unlock secure account access."));
-  const decks = state.viewedProfile ? state.viewedProfile.decks : state.profileDecks;
+  const decks = viewedProfile ? viewedProfile.decks : state.profileDecks;
   elements.profileDeckCount.textContent = String(decks.length);
   elements.profileCardTotal.textContent = String(decks.reduce((sum, deck) => sum + deck.card_total, 0));
   if (elements.profileFollowerCount) elements.profileFollowerCount.textContent = String(profile.follower_count ?? 0);
@@ -3807,7 +3832,7 @@ function renderProfileDecks() {
     elements.likedDecks.replaceChildren();
   }
   const ownProfile = activeProfile();
-  const viewedProfile = state.viewedProfile;
+  const viewedProfile = page === "profile" ? state.viewedProfile : null;
   const decks = viewedProfile ? viewedProfile.decks : state.profileDecks;
   const likedDecks = viewedProfile ? (viewedProfile.liked_decks || []) : state.likedDecks;
   const viewingOwnProfile = !viewedProfile || (ownProfile && viewedProfile.id === ownProfile.id);
@@ -4122,7 +4147,41 @@ function buildAvatarPresetValue(card, preferredName = "") {
   if (!sourceName) {
     return "";
   }
-  return `/assets/assets/logo_cropped/${avatarAssetSlug(sourceName)}.png`;
+  const cropped = `/assets/assets/logo_cropped/${avatarAssetSlug(sourceName)}.png`;
+  const knownCroppedAvatarSlugs = new Set([
+    "alcadeias-lord-of-spirits",
+    "aqua-guard",
+    "aqua-hulcus",
+    "aqua-sniper",
+    "armored-blaster-valdios",
+    "ballom-master-of-death",
+    "billion-degree-dragon",
+    "bolmeteus-steel-dragon",
+    "bolshack-dragon",
+    "brawler-zyler",
+    "bronze-arm-tribe",
+    "charmilia-the-enticer",
+    "craze-valkyrie-the-drastic",
+    "crystal-paladin",
+    "deadly-fighter-braid-claw",
+    "deathliger-lion-of-chaos",
+    "emeral",
+    "fighter-dual-fang",
+    "king-tsunami",
+    "la-ura-giga",
+    "marrow-ooze-the-twister",
+    "miar-comet-elemental",
+    "phantasmal-horror-gigazald",
+    "propeller-mutant",
+    "quixotic-hero-swine-snout",
+    "sarius-vizier-of-suppression",
+    "super-necrodragon-abzo-dolba",
+    "super-terradragon-bailas-gale"
+  ]);
+  if (knownCroppedAvatarSlugs.has(avatarAssetSlug(sourceName))) {
+    return cropped;
+  }
+  return resolveAssetUrl(card?.image_path || card?.illustration_path || cropped);
 }
 
 function avatarAssetSlug(name) {
