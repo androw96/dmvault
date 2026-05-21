@@ -61,6 +61,7 @@ const isDeckEditorPage = page === "deck-editor";
 const isCardDetailPage = page === "card-detail";
 const isHistoryPage = page === "history";
 const isPlaytestPage = page === "playtest";
+const isPlaymodePage = page === "playmode";
 const isBuilderExperiencePage = isBuilderLandingPage || isDeckEditorPage;
 const hasPreloadedBuilderDeck = window.location.pathname.match(/^\/share\/[a-z0-9-]+$/i)
   || (isDeckEditorPage && new URLSearchParams(window.location.search).has("deck"));
@@ -128,13 +129,16 @@ const state = {
     hand: [],
     shields: [],
     mana: [],
+    manaPool: [],
     battle: [],
     graveyard: [],
     turn: 1,
     ready: false
   },
   playtestSelected: null,
-  playtestEvolutionPick: null
+  playtestEvolutionPick: null,
+  playmodeMatches: [],
+  playmodeMatch: null
 };
 
 const elements = {
@@ -145,6 +149,7 @@ const elements = {
   builderEntryPanel: document.querySelector("#builder-entry-panel"),
   builderEntryStatus: document.querySelector("#builder-entry-status"),
   builderEditorSections: [...document.querySelectorAll("[data-builder-editor]")],
+  sandboxLaunchPanels: [...document.querySelectorAll(".sandbox-launch-panel")],
   newDeckButton: document.querySelector("#new-deck-button"),
   modifyDeckButton: document.querySelector("#modify-deck-button"),
   modifyDeckPanel: document.querySelector("#modify-deck-panel"),
@@ -338,12 +343,14 @@ const elements = {
   playtestManaCount: document.querySelector("#playtest-mana-count"),
   playtestGraveCount: document.querySelector("#playtest-grave-count"),
   playtestEmpty: document.querySelector("#playtest-empty"),
+  playtestAdminLocked: document.querySelector("#playtest-admin-locked"),
   playtestBoard: document.querySelector("#playtest-board"),
   playtestDrawPileZone: document.querySelector("#playtest-draw-pile-zone"),
   playtestShieldsZone: document.querySelector("#playtest-shields-zone"),
   playtestHandZone: document.querySelector("#playtest-hand-zone"),
   playtestBattleZone: document.querySelector("#playtest-battle-zone"),
   playtestManaZone: document.querySelector("#playtest-mana-zone"),
+  playtestManaPool: document.querySelector("#playtest-mana-pool"),
   playtestGraveyardZone: document.querySelector("#playtest-graveyard-zone"),
   playtestActionOverlay: null,
   playtestCinematicModal: null,
@@ -367,6 +374,23 @@ const elements = {
   contactSubject: document.querySelector("#contact-subject"),
   contactMessage: document.querySelector("#contact-message"),
   contactSubmitButton: document.querySelector("#contact-submit-button"),
+  playmodeDenied: document.querySelector("#playmode-denied"),
+  playmodePanel: document.querySelector("#playmode-panel"),
+  playmodeDeckSelect: document.querySelector("#playmode-deck-select"),
+  playmodeModeSelect: document.querySelector("#playmode-mode-select"),
+  playmodeCreateButton: document.querySelector("#playmode-create-button"),
+  playmodeOpenCode: document.querySelector("#playmode-open-code"),
+  playmodeOpenButton: document.querySelector("#playmode-open-button"),
+  playmodeList: document.querySelector("#playmode-list"),
+  playmodeStatus: document.querySelector("#playmode-status"),
+  playmodeJoinPanel: document.querySelector("#playmode-join-panel"),
+  playmodeJoinDeckSelect: document.querySelector("#playmode-join-deck-select"),
+  playmodeJoinButton: document.querySelector("#playmode-join-button"),
+  playmodeBoard: document.querySelector("#playmode-board"),
+  playmodeBoardTitle: document.querySelector("#playmode-board-title"),
+  playmodeBoardMeta: document.querySelector("#playmode-board-meta"),
+  playmodePlayerOne: document.querySelector("#playmode-player-one"),
+  playmodePlayerTwo: document.querySelector("#playmode-player-two"),
   statusNodes: [...document.querySelectorAll("[data-status]")]
 };
 
@@ -457,6 +481,7 @@ async function initialize() {
   renderBuilderDeckOptions();
   renderBuilderEntry();
   renderPrintDeckOptions();
+  renderPlaymodePage();
   renderBuilder();
   renderPrintPages();
   renderHeaderStats();
@@ -480,6 +505,8 @@ async function initialize() {
     page === "profile" ? maybeLoadViewedProfile() : Promise.resolve(),
     isCardDetailPage ? loadCardDetailPage() : Promise.resolve(),
     isHistoryPage ? loadHistoryPage() : Promise.resolve(),
+    isPlaymodePage && state.activeProfileId ? loadPlaymodeMatches() : Promise.resolve(),
+    isPlaymodePage ? maybeLoadPlaymodeMatchFromQuery() : Promise.resolve(),
     page === "admin" && state.activeProfileId ? loadAdminOverview() : Promise.resolve(),
     state.loadedShareId && state.deckHistory.length === 0 ? loadDeckHistory(state.loadedShareId) : Promise.resolve()
   ];
@@ -495,6 +522,7 @@ async function initialize() {
     renderCards();
     renderDeckHistory();
     renderPlaytestSandbox();
+    renderPlaymodePage();
     renderHeaderStats();
     renderAdminPage();
   });
@@ -522,6 +550,10 @@ function openCardDetail(card) {
 
 function playtestPagePath() {
   return window.location.protocol === "file:" ? "./playtest.html" : "/playtest";
+}
+
+function playmodePagePath() {
+  return window.location.protocol === "file:" ? "./playmode.html" : "/playmode";
 }
 
 function historyPagePath() {
@@ -561,6 +593,7 @@ function createPlaytestInstance(card, index) {
     card,
     tapped: false,
     faceDown: false,
+    manaProduced: [],
     underlays: []
   };
 }
@@ -588,6 +621,7 @@ function emptyPlaytestState(title = "Playtest Sandbox", sourceCards = [], option
     hand: [],
     shields: [],
     mana: [],
+    manaPool: [],
     battle: [],
     graveyard: [],
     turn: 1,
@@ -699,10 +733,17 @@ function completeEvolutionPlay(targetUid) {
     renderPlaytestSandbox();
     return;
   }
-  const [evolution] = state.playtest.hand.splice(handIndex, 1);
+  const evolution = state.playtest.hand[handIndex];
+  if (!consumePlaytestMana(evolution.card)) {
+    state.playtestEvolutionPick = null;
+    setStatus(`You do not have enough charged mana to evolve ${evolution.card.name}.`, "error");
+    renderPlaytestSandbox();
+    return;
+  }
+  const [playedEvolution] = state.playtest.hand.splice(handIndex, 1);
   const base = state.playtest.battle[battleIndex];
   state.playtest.battle.splice(battleIndex, 1, {
-    ...evolution,
+    ...playedEvolution,
     faceDown: false,
     tapped: false,
     underlays: [
@@ -717,14 +758,14 @@ function completeEvolutionPlay(targetUid) {
     ]
   });
   let ballomDestroyed = [];
-  if (normalizeName(evolution.card.name) === "ballom master of death") {
+  if (normalizeName(playedEvolution.card.name) === "ballom master of death") {
     ballomDestroyed = resolveBallomBattlefieldWipe(targetUid);
   }
   state.playtestEvolutionPick = null;
   state.playtestSelected = null;
   persistPlaytestState();
   renderPlaytestSandbox();
-  const evolvedName = normalizeName(evolution.card.name);
+  const evolvedName = normalizeName(playedEvolution.card.name);
   if (evolvedName === "ballom master of death") {
     playBallomEvolutionAnimation();
   } else if (evolvedName === "crystal paladin") {
@@ -733,9 +774,9 @@ function completeEvolutionPlay(targetUid) {
     playAlcadeiasEvolutionAnimation();
   }
   if (ballomDestroyed.length) {
-    setStatus(`${evolution.card.name} evolved and destroyed ${ballomDestroyed.join(", ")}.`, "success");
+    setStatus(`${playedEvolution.card.name} evolved and destroyed ${ballomDestroyed.join(", ")}.`, "success");
   } else {
-    setStatus(`${evolution.card.name} evolved successfully.`, "success");
+    setStatus(`${playedEvolution.card.name} evolved successfully.`, "success");
   }
 }
 
@@ -866,6 +907,7 @@ function setupPlaytestGame(options = {}) {
     hand,
     shields,
     mana: [],
+    manaPool: [],
     battle: [],
     graveyard: [],
     turn: keepTurn ? state.playtest.turn : 1,
@@ -899,11 +941,15 @@ function movePlaytestCard(sourceZone, uid, targetZone, options = {}) {
     return;
   }
   const [card] = source.splice(index, 1);
+  if (sourceZone === "mana") {
+    clearManaPoolForSource(uid);
+  }
   const stackEntries = [card, ...(card.underlays || [])].map((entry) => ({
     ...entry,
     underlays: [],
     tapped: options.resetTapped ? false : Boolean(options.tapped ?? entry.tapped),
-    faceDown: typeof options.faceDown === "boolean" ? options.faceDown : entry.faceDown
+    faceDown: typeof options.faceDown === "boolean" ? options.faceDown : entry.faceDown,
+    manaProduced: []
   }));
   if (stackEntries.length > 1 && targetZone !== "battle") {
     if (options.toTop) {
@@ -915,7 +961,8 @@ function movePlaytestCard(sourceZone, uid, targetZone, options = {}) {
     const moved = {
       ...card,
       tapped: options.resetTapped ? false : Boolean(options.tapped ?? card.tapped),
-      faceDown: typeof options.faceDown === "boolean" ? options.faceDown : card.faceDown
+      faceDown: typeof options.faceDown === "boolean" ? options.faceDown : card.faceDown,
+      manaProduced: []
     };
     if (options.toTop) {
       target.unshift(moved);
@@ -937,10 +984,111 @@ function togglePlaytestTapped(zoneName, uid) {
   if (!card) {
     return;
   }
+  if (zoneName === "mana") {
+    togglePlaytestManaTap(uid);
+    return;
+  }
   card.tapped = !card.tapped;
   state.playtestSelected = { zone: zoneName, uid };
   persistPlaytestState();
   renderPlaytestSandbox();
+}
+
+function playtestCardCivilizations(card) {
+  return Array.isArray(card?.civilizations) ? card.civilizations.filter(Boolean) : [];
+}
+
+function playtestCardNeedsCivilization(card) {
+  const civilizations = playtestCardCivilizations(card);
+  return civilizations.length ? civilizations : [];
+}
+
+function clearManaPoolForSource(uid) {
+  state.playtest.manaPool = (state.playtest.manaPool || []).filter((entry) => entry.sourceUid !== uid);
+}
+
+function addManaFromCard(cardEntry, civilization) {
+  if (!cardEntry) {
+    return;
+  }
+  clearManaPoolForSource(cardEntry.uid);
+  cardEntry.manaProduced = civilization ? [civilization] : [];
+  if (civilization) {
+    state.playtest.manaPool.push({
+      id: `${cardEntry.uid}-${civilization}`,
+      sourceUid: cardEntry.uid,
+      civilization
+    });
+  }
+}
+
+function togglePlaytestManaTap(uid, preferredCivilization = null) {
+  const zone = state.playtest.mana || [];
+  const card = zone.find((entry) => entry.uid === uid);
+  if (!card) {
+    return;
+  }
+  if (card.tapped) {
+    card.tapped = false;
+    card.manaProduced = [];
+    clearManaPoolForSource(uid);
+  } else {
+    const civilizations = playtestCardCivilizations(card.card);
+    const chosen = preferredCivilization && civilizations.includes(preferredCivilization)
+      ? preferredCivilization
+      : (civilizations[0] || null);
+    card.tapped = true;
+    addManaFromCard(card, chosen);
+  }
+  state.playtestSelected = { zone: "mana", uid };
+  persistPlaytestState();
+  renderPlaytestSandbox();
+}
+
+function canPayPlaytestCost(card) {
+  const pool = state.playtest.manaPool || [];
+  const cost = Math.max(0, Number(card?.cost) || 0);
+  if (pool.length < cost) {
+    return false;
+  }
+  const requiredCivilizations = playtestCardNeedsCivilization(card);
+  if (!requiredCivilizations.length) {
+    return true;
+  }
+  return pool.some((entry) => requiredCivilizations.includes(entry.civilization));
+}
+
+function consumePlaytestMana(card) {
+  const cost = Math.max(0, Number(card?.cost) || 0);
+  if (cost === 0) {
+    return true;
+  }
+  if (!canPayPlaytestCost(card)) {
+    return false;
+  }
+  const pool = [...(state.playtest.manaPool || [])];
+  const requiredCivilizations = playtestCardNeedsCivilization(card);
+  const used = [];
+  if (requiredCivilizations.length) {
+    const matchingIndex = pool.findIndex((entry) => requiredCivilizations.includes(entry.civilization));
+    if (matchingIndex === -1) {
+      return false;
+    }
+    used.push(pool.splice(matchingIndex, 1)[0]);
+  }
+  while (used.length < cost && pool.length) {
+    used.push(pool.shift());
+  }
+  state.playtest.manaPool = (state.playtest.manaPool || []).filter(
+    (entry) => !used.some((spent) => spent.id === entry.id)
+  );
+  for (const spent of used) {
+    const source = (state.playtest.mana || []).find((entry) => entry.uid === spent.sourceUid);
+    if (source) {
+      source.manaProduced = [];
+    }
+  }
+  return true;
 }
 
 function toggleShieldReveal(uid) {
@@ -1042,8 +1190,10 @@ function advancePlaytestTurn() {
     }
     for (const card of zone) {
       card.tapped = false;
+      card.manaProduced = [];
     }
   }
+  state.playtest.manaPool = [];
   state.playtest.turn = (state.playtest.turn || 1) + 1;
   drawPlaytestCards(1);
 }
@@ -1128,11 +1278,18 @@ function renderPlaytestZoneEmpty(container, message) {
 function playtestActionDefinitions(zoneName, card) {
   const actions = [];
   if (zoneName === "hand") {
+    const affordable = canPayPlaytestCost(card.card);
     actions.push(
       {
         label: isEvolutionCard(card.card) ? "Evolve" : "Play",
+        disabled: !affordable,
         run: () => {
+          if (!canPayPlaytestCost(card.card)) {
+            setStatus(`You need ${card.card.cost} mana, including ${playtestCardNeedsCivilization(card.card).join(" or ") || "a matching civilization"}, to play ${card.card.name}.`, "error");
+            return;
+          }
           if (isSpellCard(card.card)) {
+            consumePlaytestMana(card.card);
             if (isChargerSpellCard(card.card)) {
               movePlaytestCard("hand", card.uid, "mana", { faceDown: false, resetTapped: true });
               return;
@@ -1144,6 +1301,7 @@ function playtestActionDefinitions(zoneName, card) {
             beginEvolutionPlay(card);
             return;
           }
+          consumePlaytestMana(card.card);
           movePlaytestCard("hand", card.uid, "battle", { faceDown: false, resetTapped: true });
         }
       },
@@ -1160,8 +1318,21 @@ function playtestActionDefinitions(zoneName, card) {
     );
   }
   if (zoneName === "mana") {
+    const civilizations = playtestCardCivilizations(card.card);
+    if (!card.tapped) {
+      for (const civilization of civilizations.slice(0, Math.max(1, civilizations.length))) {
+        actions.push({
+          label: `Tap ${civilization}`,
+          run: () => togglePlaytestManaTap(card.uid, civilization),
+          tone: "ghost"
+        });
+      }
+    } else {
+      actions.push(
+        { label: "Ready", run: () => togglePlaytestManaTap(card.uid), tone: "ghost" }
+      );
+    }
     actions.push(
-      { label: card.tapped ? "Ready" : "Tap", run: () => togglePlaytestTapped("mana", card.uid), tone: "ghost" },
       { label: "Hand", run: () => movePlaytestCard("mana", card.uid, "hand", { faceDown: false, resetTapped: true }) },
       { label: "Battle", run: () => movePlaytestCard("mana", card.uid, "battle", { faceDown: false, resetTapped: true }) },
       { label: "Grave", run: () => movePlaytestCard("mana", card.uid, "graveyard", { faceDown: false, resetTapped: true }) }
@@ -1399,8 +1570,12 @@ function renderPlaytestActionOverlay() {
     button.type = "button";
     button.className = action.tone === "ghost" ? "small-button ghost-button" : "small-button";
     button.textContent = action.label;
+    button.disabled = Boolean(action.disabled);
     button.addEventListener("click", (event) => {
       event.stopPropagation();
+      if (action.disabled) {
+        return;
+      }
       action.run();
     });
     overlay.append(button);
@@ -1449,8 +1624,39 @@ function renderPlaytestZone(zoneName, container) {
   }
 }
 
+function playtestCivilizationColor(civilization) {
+  return {
+    Light: "#f8df6c",
+    Water: "#59c9ff",
+    Darkness: "#7f5cff",
+    Fire: "#ff7046",
+    Nature: "#6be07d"
+  }[civilization] || "#d7e8ff";
+}
+
+function renderPlaytestManaPool() {
+  if (!elements.playtestManaPool) {
+    return;
+  }
+  elements.playtestManaPool.replaceChildren();
+  const pool = state.playtest.manaPool || [];
+  elements.playtestManaPool.hidden = pool.length === 0;
+  for (const entry of pool) {
+    const orb = document.createElement("span");
+    orb.className = "playtest-mana-orb";
+    orb.title = `${entry.civilization} mana`;
+    orb.style.setProperty("--mana-orb", playtestCivilizationColor(entry.civilization));
+    elements.playtestManaPool.append(orb);
+  }
+}
+
 function renderPlaytestSandbox() {
   if (!isPlaytestPage) {
+    return;
+  }
+  const isAdmin = Boolean(activeProfile()?.is_admin);
+  if (!isAdmin) {
+    renderTestPlayAccess();
     return;
   }
   const hasSource = (state.playtest.sourceCards || []).length > 0;
@@ -1490,10 +1696,244 @@ function renderPlaytestSandbox() {
   renderPlaytestZone("battle", elements.playtestBattleZone);
   renderPlaytestZone("mana", elements.playtestManaZone);
   renderPlaytestZone("graveyard", elements.playtestGraveyardZone);
+  renderPlaytestManaPool();
   renderPlaytestActionOverlay();
 }
 
+async function loadPlaymodeMatches() {
+  if (!state.activeProfileId) {
+    state.playmodeMatches = [];
+    return;
+  }
+  const payload = await fetchJson(`${API_BASE}/playmode/matches?profile_id=${state.activeProfileId}`);
+  state.playmodeMatches = payload.items || [];
+}
+
+async function maybeLoadPlaymodeMatchFromQuery() {
+  const matchId = new URLSearchParams(window.location.search).get("match");
+  if (!matchId || window.location.protocol === "file:") {
+    return;
+  }
+  const suffix = state.activeProfileId ? `?profile_id=${state.activeProfileId}` : "";
+  state.playmodeMatch = await fetchJson(`${API_BASE}/playmode/matches/${encodeURIComponent(matchId)}${suffix}`);
+}
+
+function renderPlaymodeZoneCards(cards, { hidden = false, count = 0 } = {}) {
+  if (hidden) {
+    const ghosts = Array.from({ length: Math.min(5, count || 0) }, () => `
+      <article class="playmode-mini-card is-facedown">
+        <span class="playmode-mini-back" style="background-image:url('${playtestCoverImageUrl()}')"></span>
+      </article>
+    `).join("");
+    return ghosts || `<p class="hero-text playmode-zone-empty">Hidden hand</p>`;
+  }
+  if (!cards.length) {
+    return `<p class="hero-text playmode-zone-empty">Empty</p>`;
+  }
+  return cards.map((card) => {
+    const image = card.face_down
+      ? `<span class="playmode-mini-back" style="background-image:url('${playtestCoverImageUrl()}')"></span>`
+      : `<img class="playmode-mini-image" src="${escapeHtml(resolveAssetUrl(card.image_path || DEFAULT_LOGO_URL))}" alt="${escapeHtml(card.name)}">`;
+    return `
+      <article class="playmode-mini-card${card.tapped ? " is-tapped" : ""}${card.face_down ? " is-facedown" : ""}">
+        ${image}
+      </article>
+    `;
+  }).join("");
+}
+
+function renderPlaymodeSeat(container, player, viewerSeat, adminOverride = false) {
+  if (!container || !player) {
+    return;
+  }
+  const isViewer = adminOverride || viewerSeat === player.seat;
+  const zones = player.zones || {};
+  container.innerHTML = `
+    <div class="playmode-seat-header">
+      <div>
+        <strong>${escapeHtml(player.username ? displayUsername(player.username) : `Player ${player.seat}`)}</strong>
+        <span>${escapeHtml(player.deck_title || "No deck selected")}</span>
+      </div>
+      <span class="chip">${player.ready ? "Ready" : "Waiting"}</span>
+    </div>
+    <div class="playmode-seat-grid">
+      <section class="playmode-zone-card">
+        <div class="playmode-zone-head"><span>Shields</span><strong>${zones.shield_count ?? 0}</strong></div>
+        <div class="playmode-mini-row">${renderPlaymodeZoneCards(zones.shields || [])}</div>
+      </section>
+      <section class="playmode-zone-card">
+        <div class="playmode-zone-head"><span>Battle Zone</span><strong>${(zones.battle || []).length}</strong></div>
+        <div class="playmode-mini-row">${renderPlaymodeZoneCards(zones.battle || [])}</div>
+      </section>
+      <section class="playmode-zone-card">
+        <div class="playmode-zone-head"><span>Mana Zone</span><strong>${(zones.mana || []).length}</strong></div>
+        <div class="playmode-mini-row">${renderPlaymodeZoneCards(zones.mana || [])}</div>
+      </section>
+      <section class="playmode-zone-card">
+        <div class="playmode-zone-head"><span>Hand</span><strong>${zones.hand_count ?? 0}</strong></div>
+        <div class="playmode-mini-row">${renderPlaymodeZoneCards(zones.hand || [], { hidden: !isViewer, count: zones.hand_count ?? 0 })}</div>
+      </section>
+      <section class="playmode-zone-card">
+        <div class="playmode-zone-head"><span>Deck</span><strong>${zones.deck_count ?? 0}</strong></div>
+        <div class="playmode-zone-statline">Library is hidden. Deck order cannot be inspected.</div>
+      </section>
+      <section class="playmode-zone-card">
+        <div class="playmode-zone-head"><span>Graveyard</span><strong>${zones.graveyard_count ?? 0}</strong></div>
+        <div class="playmode-mini-row">${renderPlaymodeZoneCards(zones.graveyard || [])}</div>
+      </section>
+    </div>
+  `;
+}
+
+function renderPlaymodePage() {
+  if (!isPlaymodePage) {
+    return;
+  }
+  const loggedIn = Boolean(state.activeProfileId);
+  if (elements.playmodeDenied) {
+    elements.playmodeDenied.hidden = loggedIn;
+  }
+  if (elements.playmodePanel) {
+    elements.playmodePanel.hidden = !loggedIn;
+  }
+  if (!loggedIn) {
+    return;
+  }
+  if (elements.playmodeDeckSelect) {
+    const current = elements.playmodeDeckSelect.value;
+    elements.playmodeDeckSelect.replaceChildren();
+    for (const deck of state.profileDecks || []) {
+      const option = document.createElement("option");
+      option.value = deck.public_id;
+      option.textContent = deck.title;
+      elements.playmodeDeckSelect.append(option);
+    }
+    if (current) {
+      elements.playmodeDeckSelect.value = current;
+    }
+  }
+  if (elements.playmodeJoinDeckSelect) {
+    const current = elements.playmodeJoinDeckSelect.value;
+    elements.playmodeJoinDeckSelect.replaceChildren();
+    for (const deck of state.profileDecks || []) {
+      const option = document.createElement("option");
+      option.value = deck.public_id;
+      option.textContent = deck.title;
+      elements.playmodeJoinDeckSelect.append(option);
+    }
+    if (current) {
+      elements.playmodeJoinDeckSelect.value = current;
+    }
+  }
+  if (elements.playmodeList) {
+    elements.playmodeList.replaceChildren();
+    if (!(state.playmodeMatches || []).length) {
+      const empty = document.createElement("p");
+      empty.className = "hero-text playmode-zone-empty";
+      empty.textContent = "No Playmode matches yet. Create one with your own deck.";
+      elements.playmodeList.append(empty);
+    } else {
+      for (const match of state.playmodeMatches) {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "builder-surface playmode-match-row";
+        button.innerHTML = `
+          <strong>${escapeHtml(match.player_one_deck_title || "Deck")} vs ${escapeHtml(match.player_two_deck_title || "Waiting for opponent")}</strong>
+          <span>${escapeHtml(match.mode)} • ${escapeHtml(match.status)} • Turn ${match.current_turn}</span>
+        `;
+        button.addEventListener("click", () => {
+          window.location.assign(`${playmodePagePath()}?match=${encodeURIComponent(match.public_id)}`);
+        });
+        elements.playmodeList.append(button);
+      }
+    }
+  }
+  if (elements.playmodeBoardTitle) {
+    elements.playmodeBoardTitle.textContent = state.playmodeMatch
+      ? `Match ${state.playmodeMatch.public_id}`
+      : "No active match loaded";
+  }
+  if (elements.playmodeBoardMeta) {
+    elements.playmodeBoardMeta.textContent = state.playmodeMatch
+      ? `${state.playmodeMatch.mode} • ${state.playmodeMatch.status} • Turn ${state.playmodeMatch.current_turn}${state.playmodeMatch.deadline_label ? ` • Deadline ${state.playmodeMatch.deadline_label}` : ""}`
+      : "Open a match code or create a new one to see both boards.";
+  }
+  if (elements.playmodeJoinPanel) {
+    const canJoin = Boolean(state.playmodeMatch && !state.playmodeMatch.player_two?.profile_id && state.playmodeMatch.player_one?.profile_id !== state.activeProfileId);
+    elements.playmodeJoinPanel.hidden = !canJoin;
+  }
+  if (elements.playmodeBoard) {
+    elements.playmodeBoard.hidden = !state.playmodeMatch;
+  }
+  if (state.playmodeMatch) {
+    renderPlaymodeSeat(elements.playmodePlayerOne, state.playmodeMatch.player_one, state.playmodeMatch.viewer_seat, state.playmodeMatch.admin_override);
+    renderPlaymodeSeat(elements.playmodePlayerTwo, state.playmodeMatch.player_two, state.playmodeMatch.viewer_seat, state.playmodeMatch.admin_override);
+  }
+}
+
+async function createPlaymodeMatch() {
+  if (!state.activeProfileId) {
+    setStatus("Log in first to create a Playmode match.", "error");
+    return;
+  }
+  const deckPublicId = elements.playmodeDeckSelect?.value;
+  const mode = elements.playmodeModeSelect?.value || "live";
+  if (!deckPublicId) {
+    setStatus("Choose one of your own decks first.", "error");
+    return;
+  }
+  state.playmodeMatch = await fetchJson(`${API_BASE}/playmode/matches`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ profile_id: state.activeProfileId, deck_public_id: deckPublicId, mode })
+  });
+  await loadPlaymodeMatches();
+  renderPlaymodePage();
+  setStatus(`Playmode match created. Share code: ${state.playmodeMatch.public_id}`, "success");
+}
+
+async function openPlaymodeMatchFromInput() {
+  const matchId = elements.playmodeOpenCode?.value.trim();
+  if (!matchId) {
+    setStatus("Enter a match code first.", "error");
+    return;
+  }
+  if (window.location.protocol === "file:") {
+    setStatus("Playmode needs the live web service, not file:// preview.", "error");
+    return;
+  }
+  const suffix = state.activeProfileId ? `?profile_id=${state.activeProfileId}` : "";
+  state.playmodeMatch = await fetchJson(`${API_BASE}/playmode/matches/${encodeURIComponent(matchId)}${suffix}`);
+  const next = new URL(window.location.href);
+  next.searchParams.set("match", matchId);
+  window.history.replaceState({}, "", next);
+  renderPlaymodePage();
+}
+
+async function joinCurrentPlaymodeMatch() {
+  if (!state.activeProfileId || !state.playmodeMatch) {
+    return;
+  }
+  const deckPublicId = elements.playmodeJoinDeckSelect?.value;
+  if (!deckPublicId) {
+    setStatus("Choose one of your own decks before joining.", "error");
+    return;
+  }
+  state.playmodeMatch = await fetchJson(`${API_BASE}/playmode/matches/${encodeURIComponent(state.playmodeMatch.public_id)}/join`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ profile_id: state.activeProfileId, deck_public_id: deckPublicId })
+  });
+  await loadPlaymodeMatches();
+  renderPlaymodePage();
+  setStatus("Joined the match successfully.", "success");
+}
+
 async function loadPlaytestSandbox() {
+  if (!activeProfile()?.is_admin) {
+    renderTestPlayAccess();
+    return;
+  }
   let payload = null;
   try {
     payload = JSON.parse(window.sessionStorage.getItem(PLAYTEST_STORAGE_KEY) || "null");
@@ -1543,6 +1983,10 @@ async function loadHistoryPage() {
 }
 
 async function openPlaytestSandbox() {
+  if (!state.activeProfileId || !activeProfile()?.is_admin) {
+    setStatus("Test Play is only available for the admin profile.", "error");
+    return;
+  }
   if (totalDeckCards() === 0) {
     setStatus("Build a deck first, then open the playtest sandbox.", "error");
     return;
@@ -1996,6 +2440,15 @@ function bindEvents() {
   elements.exportSelect?.addEventListener("change", handleExportSelection);
   elements.openPlaytestButton?.addEventListener("click", () => {
     void openPlaytestSandbox();
+  });
+  elements.playmodeCreateButton?.addEventListener("click", () => {
+    void createPlaymodeMatch();
+  });
+  elements.playmodeOpenButton?.addEventListener("click", () => {
+    void openPlaymodeMatchFromInput();
+  });
+  elements.playmodeJoinButton?.addEventListener("click", () => {
+    void joinCurrentPlaymodeMatch();
   });
   elements.exploreTypeSelect?.addEventListener("change", handleExploreTypeChange);
   elements.exploreSearchInput?.addEventListener("input", (event) => {
@@ -2641,6 +3094,26 @@ function renderAuthNavigation() {
     avatar.classList.add("profile-avatar-image");
   }
   ensureAdminMenuLinks();
+  renderTestPlayAccess();
+}
+
+function renderTestPlayAccess() {
+  const isAdmin = Boolean(activeProfile()?.is_admin);
+  for (const panel of elements.sandboxLaunchPanels || []) {
+    panel.hidden = !isAdmin;
+  }
+  if (!isPlaytestPage) {
+    return;
+  }
+  if (elements.playtestAdminLocked) {
+    elements.playtestAdminLocked.hidden = isAdmin;
+  }
+  if (elements.playtestEmpty && !isAdmin) {
+    elements.playtestEmpty.hidden = true;
+  }
+  if (elements.playtestBoard) {
+    elements.playtestBoard.hidden = !isAdmin;
+  }
 }
 
 function ensureExportModal() {
@@ -6138,7 +6611,7 @@ function needsCards(currentPage) {
 }
 
 function needsProfileDecks(currentPage) {
-  return ["profile", "my-decks", "welcome", "print"].includes(currentPage);
+  return ["profile", "my-decks", "welcome", "print", "playmode"].includes(currentPage);
 }
 
 function needsExploreDecks(currentPage) {

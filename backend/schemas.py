@@ -291,3 +291,92 @@ class AdminOverviewOut(BaseModel):
     decks_by_month: list[MonthlyStatOut]
     audit_log: list[dict[str, str | int | None]]
     recent_contact_messages: list[ContactMessageOut] = []
+
+
+class PlaymodeMatchCreateIn(BaseModel):
+    profile_id: int
+    deck_public_id: str
+    mode: str = "live"
+
+
+class PlaymodeMatchJoinIn(BaseModel):
+    profile_id: int
+    deck_public_id: str
+
+
+class PlaymodeMatchUpdateIn(BaseModel):
+    profile_id: int
+    current_turn: int
+    active_seat: int
+    state: dict = Field(default_factory=dict)
+    move_summary: str | None = None
+    winner_seat: int | None = None
+
+
+class PlaymodeCardViewOut(BaseModel):
+    uid: str
+    name: str
+    civilizations: list[str]
+    cost: int
+    type: str
+    race_label: str
+    text: str
+    power: str | None = None
+    image_path: str | None = None
+    face_down: bool = False
+    tapped: bool = False
+    underlay_count: int = 0
+
+
+class PlaymodeZoneViewOut(BaseModel):
+    hand_count: int = 0
+    deck_count: int = 0
+    shield_count: int = 0
+    graveyard_count: int = 0
+    hand: list[PlaymodeCardViewOut] = []
+    shields: list[PlaymodeCardViewOut] = []
+    mana: list[PlaymodeCardViewOut] = []
+    battle: list[PlaymodeCardViewOut] = []
+    graveyard: list[PlaymodeCardViewOut] = []
+    mana_pool: list[str] = []
+
+
+class PlaymodePlayerViewOut(BaseModel):
+    seat: int
+    profile_id: int | None = None
+    username: str | None = None
+    avatar_url: str | None = None
+    deck_public_id: str | None = None
+    deck_title: str | None = None
+    ready: bool = False
+    zones: PlaymodeZoneViewOut
+
+
+class PlaymodeMatchSummaryOut(BaseModel):
+    public_id: str
+    mode: str
+    status: str
+    current_turn: int
+    active_seat: int
+    deadline_label: str | None = None
+    player_one_username: str | None = None
+    player_two_username: str | None = None
+    player_one_deck_title: str | None = None
+    player_two_deck_title: str | None = None
+
+
+class PlaymodeMatchListOut(BaseModel):
+    items: list[PlaymodeMatchSummaryOut]
+
+
+class PlaymodeMatchViewOut(BaseModel):
+    public_id: str
+    mode: str
+    status: str
+    current_turn: int
+    active_seat: int
+    viewer_seat: int | None = None
+    admin_override: bool = False
+    deadline_label: str | None = None
+    player_one: PlaymodePlayerViewOut
+    player_two: PlaymodePlayerViewOut

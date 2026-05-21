@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Paladin's Vault • Playmode</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=Cormorant+Garamond:wght@600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="./styles.css?v=20260521a">
+</head>
+<body data-page="playmode">
+  <div class="page-shell">
+    <main class="page-stack">
+      <section class="panel page-hero">
+        <p class="section-label">Playmode</p>
+        <h1>Head-to-head Duel Masters</h1>
+        <p class="hero-text">Choose one of your own saved decks, create a live or 24-hour asynchronous match, and keep both boards visible at the same time.</p>
+        <p class="hero-text" data-status id="playmode-status"></p>
+      </section>
+
+      <section id="playmode-denied" class="panel" hidden>
+        <p class="hero-text">Log in first to create or join Playmode matches. Only your own saved decks can be used here.</p>
+      </section>
+
+      <section id="playmode-panel" class="page-stack" hidden>
+        <section class="panel playmode-control-grid">
+          <div class="builder-surface playmode-create-panel">
+            <p class="section-label">Create Match</p>
+            <div class="create-profile-grid">
+              <label class="field">
+                <span>Your deck</span>
+                <select id="playmode-deck-select"></select>
+              </label>
+              <label class="field">
+                <span>Mode</span>
+                <select id="playmode-mode-select">
+                  <option value="live">Live</option>
+                  <option value="async">24h async</option>
+                </select>
+              </label>
+              <button id="playmode-create-button" type="button" class="primary-button">Create Playmode Match</button>
+            </div>
+          </div>
+
+          <div class="builder-surface playmode-open-panel">
+            <p class="section-label">Open Match</p>
+            <div class="create-profile-grid">
+              <label class="field">
+                <span>Match code</span>
+                <input id="playmode-open-code" type="text" placeholder="Paste a public match code">
+              </label>
+              <button id="playmode-open-button" type="button" class="ghost-button">Open Match</button>
+            </div>
+            <div id="playmode-join-panel" class="create-profile-grid" hidden>
+              <label class="field">
+                <span>Your deck for this match</span>
+                <select id="playmode-join-deck-select"></select>
+              </label>
+              <button id="playmode-join-button" type="button" class="primary-button">Join Match</button>
+            </div>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-header">
+            <div>
+              <p class="section-label">Your Matches</p>
+              <h2>Continue an ongoing duel</h2>
+            </div>
+          </div>
+          <div id="playmode-list" class="playmode-list"></div>
+        </section>
+
+        <section id="playmode-board" class="panel playmode-board-panel" hidden>
+          <div class="panel-header">
+            <div>
+              <p class="section-label">Match Board</p>
+              <h2 id="playmode-board-title">No match loaded</h2>
+            </div>
+            <p id="playmode-board-meta" class="hero-text">Open a match to view both boards.</p>
+          </div>
+          <div class="playmode-board-grid">
+            <section class="builder-surface playmode-seat-panel">
+              <div id="playmode-player-one"></div>
+            </section>
+            <section class="builder-surface playmode-seat-panel">
+              <div id="playmode-player-two"></div>
+            </section>
+          </div>
+        </section>
+      </section>
+    </main>
+  </div>
+  <script src="./app.js?v=20260521a"></script>
+</body>
+</html>

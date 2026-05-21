@@ -208,3 +208,29 @@ class ContactMessage(Base):
     read_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, index=True)
 
     profile: Mapped[Profile | None] = relationship()
+
+
+class PlayMatch(Base):
+    __tablename__ = "play_matches"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    public_id: Mapped[str] = mapped_column(String(40), unique=True, index=True)
+    mode: Mapped[str] = mapped_column(String(20), default="live", index=True)
+    status: Mapped[str] = mapped_column(String(20), default="waiting", index=True)
+    player_one_profile_id: Mapped[int] = mapped_column(ForeignKey("profiles.id", ondelete="CASCADE"), index=True)
+    player_one_deck_id: Mapped[int] = mapped_column(ForeignKey("decks.id", ondelete="CASCADE"), index=True)
+    player_two_profile_id: Mapped[int | None] = mapped_column(ForeignKey("profiles.id", ondelete="SET NULL"), nullable=True, index=True)
+    player_two_deck_id: Mapped[int | None] = mapped_column(ForeignKey("decks.id", ondelete="SET NULL"), nullable=True, index=True)
+    active_seat: Mapped[int] = mapped_column(Integer, default=1)
+    current_turn: Mapped[int] = mapped_column(Integer, default=1)
+    turn_deadline_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, index=True)
+    winner_profile_id: Mapped[int | None] = mapped_column(ForeignKey("profiles.id", ondelete="SET NULL"), nullable=True, index=True)
+    state_json: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+
+    player_one_profile: Mapped[Profile] = relationship(foreign_keys=[player_one_profile_id])
+    player_one_deck: Mapped[Deck] = relationship(foreign_keys=[player_one_deck_id])
+    player_two_profile: Mapped[Profile | None] = relationship(foreign_keys=[player_two_profile_id])
+    player_two_deck: Mapped[Deck | None] = relationship(foreign_keys=[player_two_deck_id])
+    winner_profile: Mapped[Profile | None] = relationship(foreign_keys=[winner_profile_id])

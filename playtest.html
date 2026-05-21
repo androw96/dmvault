@@ -7,18 +7,21 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=Cormorant+Garamond:wght@600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="./styles.css?v=20260520k">
+  <link rel="stylesheet" href="./styles.css?v=20260521a">
 </head>
 <body data-page="playtest">
   <div class="page-shell">
     <main class="page-stack">
       <section class="panel playtest-board-panel playtest-board-panel-clean">
         <p class="hero-text playtest-inline-status" data-status></p>
+        <div id="playtest-admin-locked" class="playtest-empty-state" hidden>
+          <p class="hero-text">This Test Play board is reserved for the admin profile. Open it from the admin account when you want to simulate rules and private match lines.</p>
+        </div>
         <div id="playtest-empty" class="playtest-empty-state" hidden>
-          <p class="hero-text">Open a deck from the builder, then press <strong>Playtest</strong> to send it into the sandbox.</p>
+          <p class="hero-text">Open a deck from the builder, then press <strong>Test Play</strong> to send it into the admin sandbox.</p>
         </div>
 
-        <div id="playtest-board" class="playtest-table">
+        <div id="playtest-board" class="playtest-table" hidden>
           <section class="playtest-battlefield-shell">
             <div class="playtest-battlefield-header">
               <span class="playtest-battlefield-meta">Turn <strong id="playtest-turn-value">1</strong></span>
@@ -45,6 +48,7 @@
                 <div class="playtest-inline-zone-header">
                   <span>Mana Zone</span>
                 </div>
+                <div id="playtest-mana-pool" class="playtest-mana-pool" aria-label="Available mana"></div>
                 <div id="playtest-mana-zone" class="playtest-inline-card-row"></div>
               </section>
             </div>
@@ -136,6 +140,6 @@
     </section>
   </div>
 
-  <script src="./app.js?v=20260520k"></script>
+  <script src="./app.js?v=20260521a"></script>
 </body>
 </html>

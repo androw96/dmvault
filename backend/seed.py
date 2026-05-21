@@ -183,6 +183,33 @@ def ensure_schema_updates() -> None:
                 )
                 """
             )
+        if "play_matches" not in existing_tables:
+            connection.exec_driver_sql(
+                """
+                CREATE TABLE play_matches (
+                    id INTEGER NOT NULL PRIMARY KEY,
+                    public_id VARCHAR(40) NOT NULL UNIQUE,
+                    mode VARCHAR(20) DEFAULT 'live',
+                    status VARCHAR(20) DEFAULT 'waiting',
+                    player_one_profile_id INTEGER NOT NULL,
+                    player_one_deck_id INTEGER NOT NULL,
+                    player_two_profile_id INTEGER,
+                    player_two_deck_id INTEGER,
+                    active_seat INTEGER DEFAULT 1,
+                    current_turn INTEGER DEFAULT 1,
+                    turn_deadline_at DATETIME,
+                    winner_profile_id INTEGER,
+                    state_json TEXT NOT NULL,
+                    created_at DATETIME,
+                    updated_at DATETIME,
+                    FOREIGN KEY(player_one_profile_id) REFERENCES profiles (id) ON DELETE CASCADE,
+                    FOREIGN KEY(player_one_deck_id) REFERENCES decks (id) ON DELETE CASCADE,
+                    FOREIGN KEY(player_two_profile_id) REFERENCES profiles (id) ON DELETE SET NULL,
+                    FOREIGN KEY(player_two_deck_id) REFERENCES decks (id) ON DELETE SET NULL,
+                    FOREIGN KEY(winner_profile_id) REFERENCES profiles (id) ON DELETE SET NULL
+                )
+                """
+            )
 
 
 def seed_cards_if_needed() -> int:

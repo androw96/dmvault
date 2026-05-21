@@ -3123,7 +3123,8 @@ input[type="range"] {
 .add-button,
 .primary-button,
 .ghost-button,
-.small-button {
+.small-button,
+.danger-button {
   border: none;
   border-radius: 16px;
   padding: 12px 18px;
@@ -3138,6 +3139,7 @@ input[type="range"] {
 .primary-button:hover,
 .ghost-button:hover,
 .small-button:hover,
+.danger-button:hover,
 .profile-deck-card:hover {
   transform: translateY(-1px);
 }
@@ -3162,7 +3164,12 @@ input[type="range"] {
 }
 
 .danger-button {
-  color: #ffaeae;
+  color: #fff2f4;
+  background:
+    linear-gradient(145deg, rgba(255, 255, 255, 0.28), transparent 34%),
+    linear-gradient(135deg, #ff6e84, #d92c4f);
+  font-weight: 700;
+  box-shadow: 0 12px 28px rgba(190, 34, 70, 0.24);
 }
 
 .profile-deck-actions .danger-button.profile-inline-button {
@@ -5115,6 +5122,221 @@ input[type="range"] {
 
   body[data-page="playtest"] .playtest-inline-card-row {
     gap: 6px;
+  }
+}
+
+body[data-page="playtest"] .playtest-mana-pool {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-height: 24px;
+  margin: 4px 0 10px;
+}
+
+body[data-page="playtest"] .playtest-mana-orb {
+  width: 16px;
+  height: 16px;
+  border-radius: 999px;
+  background: radial-gradient(circle at 32% 28%, rgba(255,255,255,0.88), color-mix(in srgb, var(--mana-orb) 86%, #061220) 42%, color-mix(in srgb, var(--mana-orb) 92%, #02060e) 100%);
+  box-shadow:
+    0 0 0 1px rgba(255,255,255,0.12),
+    0 0 14px color-mix(in srgb, var(--mana-orb) 42%, transparent);
+}
+
+body[data-page="playtest"] .playtest-card[data-zone="mana"].is-tapped .playtest-card-image,
+body[data-page="playtest"] .playtest-card[data-zone="mana"].is-tapped .playtest-card-back {
+  transform: rotate(180deg) !important;
+  transform-origin: center;
+}
+
+body[data-page="playtest"] .playtest-card[data-zone="battle"].is-tapped .playtest-card-image,
+body[data-page="playtest"] .playtest-card[data-zone="battle"].is-tapped .playtest-card-back {
+  transform: rotate(90deg) !important;
+  transform-origin: center;
+}
+
+body[data-page="playtest"] .playtest-action-overlay .small-button:disabled {
+  opacity: 0.46;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.playmode-control-grid,
+.playmode-board-grid {
+  display: grid;
+  gap: 18px;
+}
+
+.playmode-control-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.playmode-board-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.playmode-list {
+  display: grid;
+  gap: 12px;
+}
+
+.playmode-match-row {
+  width: 100%;
+  text-align: left;
+  display: grid;
+  gap: 6px;
+  cursor: pointer;
+}
+
+.playmode-board-panel {
+  display: grid;
+  gap: 18px;
+}
+
+.playmode-seat-panel {
+  display: grid;
+  gap: 16px;
+}
+
+.playmode-seat-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: start;
+}
+
+.playmode-seat-header div {
+  display: grid;
+  gap: 4px;
+}
+
+.playmode-seat-header span:not(.chip) {
+  color: var(--muted);
+}
+
+.playmode-seat-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.playmode-zone-card {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border-radius: 18px;
+  border: 1px solid rgba(157, 213, 255, 0.12);
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.015)),
+    rgba(8, 16, 28, 0.72);
+}
+
+.playmode-zone-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+  color: #e7f4ff;
+}
+
+.playmode-zone-head span {
+  font-size: 0.86rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+}
+
+.playmode-mini-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  min-height: 118px;
+}
+
+body[data-page="playtest"] .page-shell,
+body[data-page="playmode"] .page-shell {
+  width: 100%;
+  max-width: none;
+  margin: 0;
+  padding: 0;
+}
+
+body[data-page="playtest"] .page-stack,
+body[data-page="playmode"] .page-stack {
+  gap: 0;
+}
+
+body[data-page="playtest"] .playtest-board-panel-clean {
+  min-height: 100vh;
+  padding-inline: 0;
+}
+
+body[data-page="playmode"] .page-stack > .page-hero,
+body[data-page="playmode"] #playmode-denied,
+body[data-page="playmode"] #playmode-panel {
+  width: 100%;
+  max-width: none;
+  border-radius: 0;
+  border-left: none;
+  border-right: none;
+}
+
+body[data-page="playmode"] .page-hero,
+body[data-page="playmode"] #playmode-denied,
+body[data-page="playmode"] #playmode-panel > .panel,
+body[data-page="playmode"] .playmode-board-panel {
+  padding-inline: clamp(18px, 3vw, 32px);
+}
+
+body[data-page="playmode"] .playmode-board-panel {
+  min-height: calc(100vh - 220px);
+  border-radius: 0;
+  border-left: none;
+  border-right: none;
+}
+
+.playmode-mini-card {
+  width: 74px;
+  aspect-ratio: 63 / 88;
+  border-radius: 14px;
+  overflow: hidden;
+  border: 1px solid rgba(157, 213, 255, 0.18);
+  background: rgba(255,255,255,0.03);
+  box-shadow: 0 12px 24px rgba(2, 8, 20, 0.24);
+}
+
+.playmode-mini-card.is-tapped {
+  transform: rotate(90deg);
+  transform-origin: center;
+}
+
+.playmode-mini-image,
+.playmode-mini-back {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.playmode-mini-image {
+  object-fit: cover;
+}
+
+.playmode-mini-back {
+  background-size: cover;
+  background-position: center;
+}
+
+.playmode-zone-empty,
+.playmode-zone-statline {
+  margin: 0;
+  color: var(--muted);
+}
+
+@media (max-width: 980px) {
+  .playmode-control-grid,
+  .playmode-board-grid,
+  .playmode-seat-grid {
+    grid-template-columns: 1fr;
   }
 }
 

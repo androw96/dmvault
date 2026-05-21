@@ -22,7 +22,7 @@ from sqlalchemy.orm import Session, joinedload
 
 from .database import BASE_DIR, SessionLocal
 from .image_service import ensure_card_image
-from .models import AdminAuditLog, Card, ContactMessage, Deck, DeckItem, DeckLike, DeckRevision, EmailVerificationToken, Notification, Profile, ProfileFollow
+from .models import AdminAuditLog, Card, ContactMessage, Deck, DeckItem, DeckLike, DeckRevision, EmailVerificationToken, Notification, PlayMatch, Profile, ProfileFollow
 from .pdf_service import build_deck_pdf
 from .schemas import (
     AdminBanIn,
@@ -55,6 +55,15 @@ from .schemas import (
     MonthlyStatOut,
     NotificationListResponse,
     NotificationOut,
+    PlaymodeCardViewOut,
+    PlaymodeMatchCreateIn,
+    PlaymodeMatchJoinIn,
+    PlaymodeMatchListOut,
+    PlaymodeMatchSummaryOut,
+    PlaymodeMatchUpdateIn,
+    PlaymodeMatchViewOut,
+    PlaymodePlayerViewOut,
+    PlaymodeZoneViewOut,
     ProfileCreateIn,
     ProfileDeleteIn,
     ProfileDetailOut,
@@ -170,6 +179,12 @@ def profile_to_out(profile: Profile | None, *, include_email: bool = False, view
         following_count=len(profile.following_links),
         followed_by_viewer=bool(viewer_profile_id and any(link.follower_id == viewer_profile_id for link in profile.follower_links)),
     )
+
+
+def playmode_deadline_label(value: datetime | None) -> str | None:
+    if not value:
+        return None
+    return value.strftime("%Y-%m-%d %H:%M UTC")
 
 
 def normalize_email(email: str) -> str:
@@ -437,6 +452,48 @@ This message was sent from the Paladin's Vault admin dashboard.
     return message
 
 
+def build_playmode_turn_message(*, recipient: Profile, actor: Profile, match: PlayMatch, move_summary: str | None = None) -> EmailMessage:
+    match_url = f"{APP_BASE_URL}/playmode?match={match.public_id}"
+    subject = "Your async Playmode match is ready for your turn"
+    summary_html = f"<p style=\"margin:0 0 16px;color:#d7ecff;line-height:1.8;\">Last move: <strong>{move_summary}</strong></p>" if move_summary else ""
+    message = EmailMessage()
+    message["Subject"] = subject
+    message["From"] = f"Paladin's Vault <{SMTP_FROM_EMAIL}>"
+    message["To"] = recipient.email
+    message.set_content(
+        f"""Hello {recipient.username},
+
+{actor.username} has finished a move in your async Playmode match on Paladin's Vault.
+{f"Last move: {move_summary}\n" if move_summary else ""}
+Open the match:
+{match_url}
+
+You now have 24 hours to respond.
+"""
+    )
+    body_html = f"""
+      <p style="margin:0 0 14px;font-size:15px;line-height:1.75;color:#d7e5ff;">Hello <strong>{recipient.username}</strong>,</p>
+      <p style="margin:0 0 16px;font-size:15px;line-height:1.75;color:#d7e5ff;"><strong>{actor.username}</strong> has finished a move in your async Playmode match.</p>
+      {summary_html}
+      <div style="text-align:center;margin:24px 0 20px;">
+        <a href="{match_url}" style="display:inline-block;padding:14px 22px;border-radius:14px;background:linear-gradient(135deg,#7ce7ff,#9fcbff);color:#081018;text-decoration:none;font-weight:800;letter-spacing:0.04em;">Open Match</a>
+      </div>
+      <p style="margin:0;font-size:13px;line-height:1.7;color:#9fb2d5;">You now have <strong>24 hours</strong> to respond in this async game.</p>
+    """
+    footer_html = "You are receiving this because you are seated in an async Paladin's Vault Playmode match."
+    message.add_alternative(
+        build_email_shell(
+            eyebrow="Async Playmode",
+            title="It is your turn",
+            intro="A new async move is waiting for you.",
+            body_html=body_html,
+            footer_html=footer_html,
+        ),
+        subtype="html",
+    )
+    return message
+
+
 def send_via_resend_api(message: EmailMessage) -> None:
     text_part = message.get_body(preferencelist=("plain",))
     html_part = message.get_body(preferencelist=("html",))
@@ -611,6 +668,183 @@ def notification_to_out(notification: Notification) -> NotificationOut:
     )
 
 
+def playmode_serialize_card(card: Card) -> dict:
+    return {
+        "id": card.id,
+        "name": card.name,
+        "civilizations": [value for value in (card.civilizations or "").split("|") if value],
+        "cost": card.cost,
+        "type": card.type,
+        "race_label": card.race_label or "",
+        "text": card.text or "",
+        "power": card.power,
+        "image_path": format_image_path(card.source_card_image_id, card.source_image_url, card.image_status),
+    }
+
+
+def build_playmode_stack_for_deck(deck: Deck) -> list[dict]:
+    cards: list[dict] = []
+    items = sorted(deck.items, key=lambda item: (item.card.cost, item.card.name, item.card.id))
+    counter = 0
+    for item in items:
+        for _ in range(item.quantity):
+            counter += 1
+            cards.append({
+                "uid": f"{item.card_id}-{counter}-{secrets.token_hex(2)}",
+                "card": playmode_serialize_card(item.card),
+                "tapped": False,
+                "faceDown": False,
+                "manaProduced": [],
+                "underlays": [],
+            })
+    rng = secrets.SystemRandom()
+    rng.shuffle(cards)
+    return cards
+
+
+def build_playmode_player_state(deck: Deck) -> dict:
+    stack = build_playmode_stack_for_deck(deck)
+    shields = [{**entry, "faceDown": True} for entry in stack[:5]]
+    hand = [{**entry, "faceDown": False} for entry in stack[5:10]]
+    draw_pile = stack[10:]
+    return {
+        "sourceCards": [entry["card"] for entry in stack],
+        "drawPile": draw_pile,
+        "hand": hand,
+        "shields": shields,
+        "mana": [],
+        "manaPool": [],
+        "battle": [],
+        "graveyard": [],
+        "turn": 1,
+        "ready": True,
+    }
+
+
+def build_playmode_match_state(deck_one: Deck, deck_two: Deck | None = None) -> dict:
+    return {
+        "current_turn": 1,
+        "active_seat": 1,
+        "winner_seat": None,
+        "player_one": build_playmode_player_state(deck_one),
+        "player_two": build_playmode_player_state(deck_two) if deck_two else {
+            "sourceCards": [],
+            "drawPile": [],
+            "hand": [],
+            "shields": [],
+            "mana": [],
+            "manaPool": [],
+            "battle": [],
+            "graveyard": [],
+            "turn": 1,
+            "ready": False,
+        },
+    }
+
+
+def ensure_owned_deck(db: Session, public_id: str, profile_id: int) -> Deck:
+    deck = db.scalar(
+        select(Deck)
+        .where(Deck.public_id == public_id)
+        .options(joinedload(Deck.items).joinedload(DeckItem.card))
+    )
+    if not deck:
+        raise HTTPException(status_code=404, detail="Deck not found.")
+    if deck.profile_id != profile_id:
+        raise HTTPException(status_code=403, detail="You can only start Playmode with your own saved deck.")
+    if not deck.items:
+        raise HTTPException(status_code=400, detail="This deck has no cards.")
+    card_total = sum(item.quantity for item in deck.items)
+    if card_total < 40:
+        raise HTTPException(status_code=400, detail="Playmode requires a deck with at least 40 cards.")
+    return deck
+
+
+def playmode_card_view(entry: dict, *, face_down_override: bool | None = None) -> PlaymodeCardViewOut:
+    card = entry.get("card") or {}
+    face_down = entry.get("faceDown", False) if face_down_override is None else face_down_override
+    return PlaymodeCardViewOut(
+        uid=entry.get("uid", ""),
+        name="Hidden card" if face_down else (card.get("name") or "Unknown card"),
+        civilizations=[] if face_down else list(card.get("civilizations") or []),
+        cost=0 if face_down else int(card.get("cost") or 0),
+        type="" if face_down else (card.get("type") or ""),
+        race_label="" if face_down else (card.get("race_label") or ""),
+        text="" if face_down else (card.get("text") or ""),
+        power=None if face_down else card.get("power"),
+        image_path=None if face_down else card.get("image_path"),
+        face_down=face_down,
+        tapped=bool(entry.get("tapped")),
+        underlay_count=len(entry.get("underlays") or []),
+    )
+
+
+def playmode_zone_view(player_state: dict, *, hide_hand: bool) -> PlaymodeZoneViewOut:
+    hand_entries = list(player_state.get("hand") or [])
+    return PlaymodeZoneViewOut(
+        hand_count=len(hand_entries),
+        deck_count=len(player_state.get("drawPile") or []),
+        shield_count=len(player_state.get("shields") or []),
+        graveyard_count=len(player_state.get("graveyard") or []),
+        hand=[] if hide_hand else [playmode_card_view(entry) for entry in hand_entries],
+        shields=[playmode_card_view(entry, face_down_override=bool(entry.get("faceDown", True))) for entry in (player_state.get("shields") or [])],
+        mana=[playmode_card_view(entry) for entry in (player_state.get("mana") or [])],
+        battle=[playmode_card_view(entry) for entry in (player_state.get("battle") or [])],
+        graveyard=[playmode_card_view(entry) for entry in (player_state.get("graveyard") or [])],
+        mana_pool=[entry for entry in (player_state.get("manaPool") or []) if isinstance(entry, str)] or [entry.get("civilization") for entry in (player_state.get("manaPool") or []) if isinstance(entry, dict) and entry.get("civilization")],
+    )
+
+
+def playmode_match_summary(match: PlayMatch) -> PlaymodeMatchSummaryOut:
+    return PlaymodeMatchSummaryOut(
+        public_id=match.public_id,
+        mode=match.mode,
+        status=match.status,
+        current_turn=match.current_turn,
+        active_seat=match.active_seat,
+        deadline_label=playmode_deadline_label(match.turn_deadline_at),
+        player_one_username=match.player_one_profile.username if match.player_one_profile else None,
+        player_two_username=match.player_two_profile.username if match.player_two_profile else None,
+        player_one_deck_title=match.player_one_deck.title if match.player_one_deck else None,
+        player_two_deck_title=match.player_two_deck.title if match.player_two_deck else None,
+    )
+
+
+def playmode_match_view(match: PlayMatch, viewer_profile_id: int | None, *, admin_override: bool = False) -> PlaymodeMatchViewOut:
+    payload = json.loads(match.state_json)
+    viewer_seat = 1 if viewer_profile_id == match.player_one_profile_id else (2 if viewer_profile_id == match.player_two_profile_id else None)
+    return PlaymodeMatchViewOut(
+        public_id=match.public_id,
+        mode=match.mode,
+        status=match.status,
+        current_turn=match.current_turn,
+        active_seat=match.active_seat,
+        viewer_seat=viewer_seat,
+        admin_override=admin_override,
+        deadline_label=playmode_deadline_label(match.turn_deadline_at),
+        player_one=PlaymodePlayerViewOut(
+            seat=1,
+            profile_id=match.player_one_profile_id,
+            username=match.player_one_profile.username if match.player_one_profile else None,
+            avatar_url=match.player_one_profile.avatar_url if match.player_one_profile else None,
+            deck_public_id=match.player_one_deck.public_id if match.player_one_deck else None,
+            deck_title=match.player_one_deck.title if match.player_one_deck else None,
+            ready=bool(payload.get("player_one", {}).get("ready")),
+            zones=playmode_zone_view(payload.get("player_one", {}), hide_hand=(viewer_seat != 1 and not admin_override)),
+        ),
+        player_two=PlaymodePlayerViewOut(
+            seat=2,
+            profile_id=match.player_two_profile_id,
+            username=match.player_two_profile.username if match.player_two_profile else None,
+            avatar_url=match.player_two_profile.avatar_url if match.player_two_profile else None,
+            deck_public_id=match.player_two_deck.public_id if match.player_two_deck else None,
+            deck_title=match.player_two_deck.title if match.player_two_deck else None,
+            ready=bool(payload.get("player_two", {}).get("ready")),
+            zones=playmode_zone_view(payload.get("player_two", {}), hide_hand=(viewer_seat != 2 and not admin_override)),
+        ),
+    )
+
+
 def build_deck_snapshot(title: str, visibility: str, items: list[DeckItem]) -> str:
     payload = {
         "title": title,
@@ -712,6 +946,11 @@ def builder_history_page() -> HTMLResponse:
 @app.get("/playtest", response_class=HTMLResponse)
 def playtest_page() -> HTMLResponse:
     return render_page("playtest.html")
+
+
+@app.get("/playmode", response_class=HTMLResponse)
+def playmode_page() -> HTMLResponse:
+    return render_page("playmode.html")
 
 
 @app.get("/cards", response_class=HTMLResponse)
@@ -1070,6 +1309,225 @@ def follow_profile(profile_id: int, payload: FollowToggleIn, request: Request, d
         .where(Profile.id == profile_id)
     ).unique().scalar_one()
     return profile_to_out(refreshed)
+
+
+@app.get("/api/playmode/matches", response_model=PlaymodeMatchListOut)
+def list_playmode_matches(profile_id: int, db: Session = Depends(get_db)) -> PlaymodeMatchListOut:
+    profile = db.get(Profile, profile_id)
+    if not profile:
+        raise HTTPException(status_code=404, detail="Profile not found.")
+    query = (
+        select(PlayMatch)
+        .options(
+            joinedload(PlayMatch.player_one_profile),
+            joinedload(PlayMatch.player_two_profile),
+            joinedload(PlayMatch.player_one_deck),
+            joinedload(PlayMatch.player_two_deck),
+        )
+        .order_by(PlayMatch.updated_at.desc(), PlayMatch.created_at.desc())
+    )
+    if not profile.is_admin:
+        query = query.where((PlayMatch.player_one_profile_id == profile_id) | (PlayMatch.player_two_profile_id == profile_id))
+    matches = db.execute(query).unique().scalars().all()
+    return PlaymodeMatchListOut(items=[playmode_match_summary(match) for match in matches])
+
+
+@app.post("/api/playmode/matches", response_model=PlaymodeMatchViewOut)
+def create_playmode_match(payload: PlaymodeMatchCreateIn, db: Session = Depends(get_db)) -> PlaymodeMatchViewOut:
+    profile = db.get(Profile, payload.profile_id)
+    if not profile:
+        raise HTTPException(status_code=404, detail="Profile not found.")
+    if payload.mode not in {"live", "async"}:
+        raise HTTPException(status_code=400, detail="Mode must be either live or async.")
+    deck = ensure_owned_deck(db, payload.deck_public_id, payload.profile_id)
+    match = PlayMatch(
+        public_id=generate_public_id(),
+        mode=payload.mode,
+        status="waiting",
+        player_one_profile_id=payload.profile_id,
+        player_one_deck_id=deck.id,
+        active_seat=1,
+        current_turn=1,
+        turn_deadline_at=None,
+        state_json=json.dumps(build_playmode_match_state(deck)),
+        created_at=datetime.utcnow(),
+        updated_at=datetime.utcnow(),
+    )
+    db.add(match)
+    db.commit()
+    loaded = db.scalar(
+        select(PlayMatch)
+        .where(PlayMatch.public_id == match.public_id)
+        .options(
+            joinedload(PlayMatch.player_one_profile),
+            joinedload(PlayMatch.player_two_profile),
+            joinedload(PlayMatch.player_one_deck),
+            joinedload(PlayMatch.player_two_deck),
+        )
+    )
+    return playmode_match_view(loaded, payload.profile_id, admin_override=bool(profile.is_admin))
+
+
+@app.post("/api/playmode/matches/{public_id}/join", response_model=PlaymodeMatchViewOut)
+def join_playmode_match(public_id: str, payload: PlaymodeMatchJoinIn, db: Session = Depends(get_db)) -> PlaymodeMatchViewOut:
+    profile = db.get(Profile, payload.profile_id)
+    if not profile:
+        raise HTTPException(status_code=404, detail="Profile not found.")
+    match = db.scalar(
+        select(PlayMatch)
+        .where(PlayMatch.public_id == public_id)
+        .options(
+            joinedload(PlayMatch.player_one_profile),
+            joinedload(PlayMatch.player_two_profile),
+            joinedload(PlayMatch.player_one_deck).joinedload(Deck.items).joinedload(DeckItem.card),
+            joinedload(PlayMatch.player_two_deck),
+        )
+    )
+    if not match:
+        raise HTTPException(status_code=404, detail="Match not found.")
+    if match.player_one_profile_id == payload.profile_id:
+        raise HTTPException(status_code=400, detail="You are already seated in this match.")
+    if match.player_two_profile_id and match.player_two_profile_id != payload.profile_id:
+        raise HTTPException(status_code=400, detail="This match already has two players.")
+    deck = ensure_owned_deck(db, payload.deck_public_id, payload.profile_id)
+    if not match.player_two_profile_id:
+        match.player_two_profile_id = payload.profile_id
+        match.player_two_deck_id = deck.id
+        match.status = "active"
+        match.state_json = json.dumps(build_playmode_match_state(match.player_one_deck, deck))
+        match.turn_deadline_at = datetime.utcnow() + timedelta(hours=24) if match.mode == "async" else None
+        match.updated_at = datetime.utcnow()
+        db.commit()
+    loaded = db.scalar(
+        select(PlayMatch)
+        .where(PlayMatch.public_id == public_id)
+        .options(
+            joinedload(PlayMatch.player_one_profile),
+            joinedload(PlayMatch.player_two_profile),
+            joinedload(PlayMatch.player_one_deck),
+            joinedload(PlayMatch.player_two_deck),
+        )
+    )
+    return playmode_match_view(loaded, payload.profile_id, admin_override=bool(profile.is_admin))
+
+
+@app.get("/api/playmode/matches/{public_id}", response_model=PlaymodeMatchViewOut)
+def get_playmode_match(public_id: str, profile_id: int | None = None, db: Session = Depends(get_db)) -> PlaymodeMatchViewOut:
+    viewer_profile = db.get(Profile, profile_id) if profile_id else None
+    match = db.scalar(
+        select(PlayMatch)
+        .where(PlayMatch.public_id == public_id)
+        .options(
+            joinedload(PlayMatch.player_one_profile),
+            joinedload(PlayMatch.player_two_profile),
+            joinedload(PlayMatch.player_one_deck),
+            joinedload(PlayMatch.player_two_deck),
+        )
+    )
+    if not match:
+        raise HTTPException(status_code=404, detail="Match not found.")
+    if viewer_profile and viewer_profile.is_admin:
+        return playmode_match_view(match, profile_id, admin_override=True)
+    if profile_id and profile_id not in {match.player_one_profile_id, match.player_two_profile_id}:
+        raise HTTPException(status_code=403, detail="You do not have access to this match.")
+    return playmode_match_view(match, profile_id)
+
+
+@app.post("/api/playmode/matches/{public_id}/state", response_model=PlaymodeMatchViewOut)
+def update_playmode_match(public_id: str, payload: PlaymodeMatchUpdateIn, db: Session = Depends(get_db)) -> PlaymodeMatchViewOut:
+    acting_profile = db.get(Profile, payload.profile_id)
+    if not acting_profile:
+        raise HTTPException(status_code=404, detail="Profile not found.")
+    is_admin_override = bool(acting_profile.is_admin)
+    match = db.scalar(
+        select(PlayMatch)
+        .where(PlayMatch.public_id == public_id)
+        .options(
+            joinedload(PlayMatch.player_one_profile),
+            joinedload(PlayMatch.player_two_profile),
+            joinedload(PlayMatch.player_one_deck),
+            joinedload(PlayMatch.player_two_deck),
+        )
+    )
+    if not match:
+        raise HTTPException(status_code=404, detail="Match not found.")
+    if match.status not in {"active", "waiting"}:
+        raise HTTPException(status_code=400, detail="This match can no longer be updated.")
+
+    mover_seat = 1 if payload.profile_id == match.player_one_profile_id else (2 if payload.profile_id == match.player_two_profile_id else None)
+    if not mover_seat and not is_admin_override:
+        raise HTTPException(status_code=403, detail="You are not seated in this match.")
+    if not is_admin_override and match.active_seat != mover_seat:
+        raise HTTPException(status_code=403, detail="It is not your turn.")
+    if payload.active_seat not in {1, 2}:
+        raise HTTPException(status_code=400, detail="Active seat must be 1 or 2.")
+    if payload.current_turn < 1:
+        raise HTTPException(status_code=400, detail="Turn number must be at least 1.")
+
+    now = datetime.utcnow()
+    match.state_json = json.dumps(payload.state)
+    match.current_turn = payload.current_turn
+    match.active_seat = payload.active_seat
+    match.updated_at = now
+
+    winner_profile: Profile | None = None
+    if payload.winner_seat in {1, 2}:
+        winner_profile = match.player_one_profile if payload.winner_seat == 1 else match.player_two_profile
+        match.status = "finished"
+        match.winner_profile_id = winner_profile.id if winner_profile else None
+        match.turn_deadline_at = None
+    else:
+        match.status = "active"
+        match.winner_profile_id = None
+        match.turn_deadline_at = now + timedelta(hours=24) if match.mode == "async" else None
+
+    opponent_profile = match.player_one_profile if payload.active_seat == 1 else match.player_two_profile
+    should_notify_async_opponent = (
+        match.mode == "async"
+        and match.status == "active"
+        and opponent_profile is not None
+        and opponent_profile.id != payload.profile_id
+    )
+    if should_notify_async_opponent:
+        summary = payload.move_summary or f"{acting_profile.username} ended their turn."
+        db.add(
+            Notification(
+                profile_id=opponent_profile.id,
+                actor_profile_id=payload.profile_id,
+                type="playmode_turn",
+                message=f"Your async Playmode match {match.public_id} is waiting for your turn. {summary}",
+                created_at=now,
+            )
+        )
+
+    db.commit()
+
+    if should_notify_async_opponent and opponent_profile and opponent_profile.email and opponent_profile.email_verified_at:
+        actor_profile = acting_profile
+        if actor_profile:
+            try:
+                send_email_message(
+                    build_playmode_turn_message(
+                        recipient=opponent_profile,
+                        actor=actor_profile,
+                        match=match,
+                        move_summary=payload.move_summary,
+                    )
+                )
+            except Exception as error:
+                logger.exception("Async Playmode turn email failed: %s", error)
+
+    loaded = db.scalar(
+        select(PlayMatch)
+        .where(PlayMatch.public_id == public_id)
+        .options(
+            joinedload(PlayMatch.player_one_profile),
+            joinedload(PlayMatch.player_two_profile),
+            joinedload(PlayMatch.player_one_deck),
+            joinedload(PlayMatch.player_two_deck),
+        )
+    )
+    return playmode_match_view(loaded, payload.profile_id, admin_override=is_admin_override)
 
 
 @app.get("/api/profiles/{profile_id}/notifications", response_model=NotificationListResponse)
