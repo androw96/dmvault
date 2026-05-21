@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=Cormorant+Garamond:wght@600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="./styles.css?v=20260521a">
+  <link rel="stylesheet" href="./styles.css?v=20260521d">
 </head>
 <body data-page="playmode">
   <div class="page-shell">
@@ -78,8 +78,24 @@
               <p class="section-label">Match Board</p>
               <h2 id="playmode-board-title">No match loaded</h2>
             </div>
-            <p id="playmode-board-meta" class="hero-text">Open a match to view both boards.</p>
+            <div class="playmode-board-header-actions">
+              <p id="playmode-board-meta" class="hero-text">Open a match to view both boards.</p>
+              <button id="playmode-exit-button" type="button" class="danger-button">Exit</button>
+            </div>
           </div>
+          <section id="playmode-phase-panel" class="builder-surface playmode-phase-panel" hidden>
+            <div class="playmode-phase-head">
+              <div>
+                <p class="section-label">Turn Flow</p>
+                <h3 id="playmode-phase-title">Untap</h3>
+              </div>
+              <p id="playmode-phase-copy" class="hero-text">Follow the official phase order and pass the turn with End Turn.</p>
+            </div>
+            <div id="playmode-phase-track" class="playmode-phase-track"></div>
+            <div class="playmode-phase-actions">
+              <button id="playmode-phase-advance-button" type="button" class="primary-button">Advance Phase</button>
+            </div>
+          </section>
           <div class="playmode-board-grid">
             <section class="builder-surface playmode-seat-panel">
               <div id="playmode-player-one"></div>
@@ -92,6 +108,6 @@
       </section>
     </main>
   </div>
-  <script src="./app.js?v=20260521a"></script>
+  <script src="./app.js?v=20260521d"></script>
 </body>
 </html>

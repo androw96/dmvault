@@ -308,6 +308,7 @@ class PlaymodeMatchUpdateIn(BaseModel):
     profile_id: int
     current_turn: int
     active_seat: int
+    current_phase: str
     state: dict = Field(default_factory=dict)
     move_summary: str | None = None
     winner_seat: int | None = None
@@ -358,6 +359,7 @@ class PlaymodeMatchSummaryOut(BaseModel):
     status: str
     current_turn: int
     active_seat: int
+    current_phase: str
     deadline_label: str | None = None
     player_one_username: str | None = None
     player_two_username: str | None = None
@@ -375,6 +377,7 @@ class PlaymodeMatchViewOut(BaseModel):
     status: str
     current_turn: int
     active_seat: int
+    current_phase: str
     viewer_seat: int | None = None
     admin_override: bool = False
     deadline_label: str | None = None

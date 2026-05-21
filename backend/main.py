@@ -725,6 +725,7 @@ def build_playmode_match_state(deck_one: Deck, deck_two: Deck | None = None) -> 
     return {
         "current_turn": 1,
         "active_seat": 1,
+        "current_phase": "untap",
         "winner_seat": None,
         "player_one": build_playmode_player_state(deck_one),
         "player_two": build_playmode_player_state(deck_two) if deck_two else {
@@ -796,12 +797,14 @@ def playmode_zone_view(player_state: dict, *, hide_hand: bool) -> PlaymodeZoneVi
 
 
 def playmode_match_summary(match: PlayMatch) -> PlaymodeMatchSummaryOut:
+    payload = json.loads(match.state_json or "{}")
     return PlaymodeMatchSummaryOut(
         public_id=match.public_id,
         mode=match.mode,
         status=match.status,
         current_turn=match.current_turn,
         active_seat=match.active_seat,
+        current_phase=str(payload.get("current_phase") or "untap"),
         deadline_label=playmode_deadline_label(match.turn_deadline_at),
         player_one_username=match.player_one_profile.username if match.player_one_profile else None,
         player_two_username=match.player_two_profile.username if match.player_two_profile else None,
@@ -819,6 +822,7 @@ def playmode_match_view(match: PlayMatch, viewer_profile_id: int | None, *, admi
         status=match.status,
         current_turn=match.current_turn,
         active_seat=match.active_seat,
+        current_phase=str(payload.get("current_phase") or "untap"),
         viewer_seat=viewer_seat,
         admin_override=admin_override,
         deadline_label=playmode_deadline_label(match.turn_deadline_at),
@@ -1385,7 +1389,8 @@ def join_playmode_match(public_id: str, payload: PlaymodeMatchJoinIn, db: Sessio
     )
     if not match:
         raise HTTPException(status_code=404, detail="Match not found.")
-    if match.player_one_profile_id == payload.profile_id:
+    same_player_admin_join = bool(profile.is_admin and match.player_one_profile_id == payload.profile_id and not match.player_two_profile_id)
+    if match.player_one_profile_id == payload.profile_id and not same_player_admin_join:
         raise HTTPException(status_code=400, detail="You are already seated in this match.")
     if match.player_two_profile_id and match.player_two_profile_id != payload.profile_id:
         raise HTTPException(status_code=400, detail="This match already has two players.")
@@ -1463,12 +1468,18 @@ def update_playmode_match(public_id: str, payload: PlaymodeMatchUpdateIn, db: Se
         raise HTTPException(status_code=400, detail="Active seat must be 1 or 2.")
     if payload.current_turn < 1:
         raise HTTPException(status_code=400, detail="Turn number must be at least 1.")
+    if payload.current_phase not in {"untap", "draw", "charge", "play", "attack", "end"}:
+        raise HTTPException(status_code=400, detail="Phase must be untap, draw, charge, play, attack, or end.")
 
     now = datetime.utcnow()
-    match.state_json = json.dumps(payload.state)
+    state_payload = dict(payload.state or {})
+    state_payload["current_phase"] = payload.current_phase
+    state_payload["current_turn"] = payload.current_turn
+    state_payload["active_seat"] = payload.active_seat
     match.current_turn = payload.current_turn
     match.active_seat = payload.active_seat
     match.updated_at = now
+    match.state_json = json.dumps(state_payload)
 
     winner_profile: Profile | None = None
     if payload.winner_seat in {1, 2}:

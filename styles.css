@@ -2571,6 +2571,17 @@ body[data-page="playtest"] .page-stack {
   transform-origin: center;
 }
 
+.playtest-card.is-mana-card .playtest-card-image,
+.playtest-card.is-mana-card .playtest-card-back {
+  transform: rotate(180deg);
+  transform-origin: center;
+}
+
+.playtest-card.is-mana-card.is-tapped .playtest-card-image,
+.playtest-card.is-mana-card.is-tapped .playtest-card-back {
+  transform: rotate(90deg);
+}
+
 .playtest-card-image-button {
   padding: 0;
   border: none;
@@ -5215,6 +5226,48 @@ body[data-page="playtest"] .playtest-action-overlay .small-button:disabled {
   gap: 18px;
 }
 
+.playmode-phase-panel {
+  display: grid;
+  gap: 14px;
+  padding: 18px;
+}
+
+.playmode-phase-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: end;
+}
+
+.playmode-phase-head h3 {
+  margin: 4px 0 0;
+  font-size: 1.3rem;
+  letter-spacing: 0.04em;
+}
+
+.playmode-phase-track {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.playmode-phase-chip {
+  opacity: 0.72;
+  border-color: rgba(157, 213, 255, 0.18);
+}
+
+.playmode-phase-chip.is-active {
+  opacity: 1;
+  border-color: rgba(124, 231, 255, 0.42);
+  box-shadow: 0 0 18px rgba(124, 231, 255, 0.18);
+}
+
+.playmode-phase-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
 .playmode-seat-panel {
   display: grid;
   gap: 16px;
@@ -5332,6 +5385,15 @@ body[data-page="playmode"] .playmode-board-panel {
   transform-origin: center;
 }
 
+.playmode-mini-card.is-mana {
+  transform: rotate(180deg);
+  transform-origin: center;
+}
+
+.playmode-mini-card.is-mana.is-tapped {
+  transform: rotate(90deg);
+}
+
 .playmode-mini-image,
 .playmode-mini-back {
   display: block;
@@ -5352,6 +5414,12 @@ body[data-page="playmode"] .playmode-board-panel {
 .playmode-zone-statline {
   margin: 0;
   color: var(--muted);
+}
+
+.playmode-board-header-actions {
+  display: grid;
+  justify-items: end;
+  gap: 10px;
 }
 
 @media (max-width: 980px) {
