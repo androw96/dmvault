@@ -149,7 +149,7 @@ const elements = {
   builderEntryPanel: document.querySelector("#builder-entry-panel"),
   builderEntryStatus: document.querySelector("#builder-entry-status"),
   builderEditorSections: [...document.querySelectorAll("[data-builder-editor]")],
-  sandboxLaunchPanels: [...document.querySelectorAll(".sandbox-launch-panel")],
+  adminTestPlayPanels: [...document.querySelectorAll(".admin-test-play-panel")],
   newDeckButton: document.querySelector("#new-deck-button"),
   modifyDeckButton: document.querySelector("#modify-deck-button"),
   modifyDeckPanel: document.querySelector("#modify-deck-panel"),
@@ -158,6 +158,7 @@ const elements = {
   cancelModifyDeckButton: document.querySelector("#cancel-modify-deck-button"),
   exportSelect: document.querySelector("#export-select"),
   openPlaytestButton: document.querySelector("#open-playtest-button"),
+  openPlaymodePageButton: document.querySelector("#open-playmode-page-button"),
   builderViewSelect: document.querySelector("#builder-view-select"),
   deckCoverSelect: document.querySelector("#deck-cover-select"),
   deckWorkspaceTitle: document.querySelector("#deck-workspace-title"),
@@ -2309,6 +2310,27 @@ function ensureAdminMenuLinks() {
   navLinks.insertBefore(topLevelLink, anchorTarget || null);
 }
 
+function ensurePlaymodeNavLink() {
+  const navLinks = document.querySelector(".top-nav-links");
+  if (!navLinks) {
+    return;
+  }
+  const existing = navLinks.querySelector("[data-playmode-top-link]");
+  if (existing) {
+    existing.href = "/playmode";
+    return;
+  }
+  const link = document.createElement("a");
+  link.className = "nav-link";
+  link.href = "/playmode";
+  link.dataset.routeLink = "playmode";
+  link.dataset.playmodeTopLink = "true";
+  link.textContent = "Play Mode";
+  const anchorTarget = navLinks.querySelector("[data-login-nav], .nav-notification-dropdown, .nav-avatar-dropdown, [data-profile-menu]");
+  navLinks.insertBefore(link, anchorTarget || null);
+  elements.routeLinks = [...document.querySelectorAll("[data-route-link]")];
+}
+
 async function markNotificationsRead() {
   if (!state.activeProfileId) {
     return;
@@ -2440,6 +2462,9 @@ function bindEvents() {
   elements.exportSelect?.addEventListener("change", handleExportSelection);
   elements.openPlaytestButton?.addEventListener("click", () => {
     void openPlaytestSandbox();
+  });
+  elements.openPlaymodePageButton?.addEventListener("click", () => {
+    window.location.assign(playmodePagePath());
   });
   elements.playmodeCreateButton?.addEventListener("click", () => {
     void createPlaymodeMatch();
@@ -2812,6 +2837,7 @@ async function loadProfileDecks(profileId) {
   renderBuilderDeckOptions();
   renderBuilderEntry();
   renderPrintDeckOptions();
+  renderProfileDecks();
 }
 
 async function loadExploreDecks() {
@@ -3093,13 +3119,14 @@ function renderAuthNavigation() {
     }
     avatar.classList.add("profile-avatar-image");
   }
+  ensurePlaymodeNavLink();
   ensureAdminMenuLinks();
   renderTestPlayAccess();
 }
 
 function renderTestPlayAccess() {
   const isAdmin = Boolean(activeProfile()?.is_admin);
-  for (const panel of elements.sandboxLaunchPanels || []) {
+  for (const panel of elements.adminTestPlayPanels || []) {
     panel.hidden = !isAdmin;
   }
   if (!isPlaytestPage) {
