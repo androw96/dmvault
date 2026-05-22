@@ -4595,11 +4595,23 @@ function buildAvatarPresetValue(card, preferredName = "") {
   if (knownCroppedAvatarSlugs.has(avatarAssetSlug(sourceName))) {
     return cropped;
   }
-  return resolveAssetUrl(card?.image_path || card?.illustration_path || cropped);
+  const artSource = resolveAssetUrl(card?.illustration_path || card?.image_path || cropped);
+  return withAvatarPresetFocus(artSource, sourceName);
 }
 
 function avatarAssetSlug(name) {
   return normalizeName(name).replace(/\s+/g, "-");
+}
+
+function withAvatarPresetFocus(url, sourceName) {
+  if (!url) {
+    return "";
+  }
+  const focus = AVATAR_PRESET_FOCUS[normalizeName(sourceName)];
+  if (!focus) {
+    return url;
+  }
+  return `${url}#avatar=${focus.x},${focus.y},${focus.zoom}`;
 }
 
 function avatarCivilizationAccent(civilization) {

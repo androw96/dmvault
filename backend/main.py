@@ -73,7 +73,7 @@ from .schemas import (
     VerificationResendIn,
 )
 from .seed import seed_cards_if_needed
-from .utils import format_image_path, format_illustration_path, generate_public_id, slugify
+from .utils import canonical_card_name, format_image_path, format_illustration_path, generate_public_id, slugify
 
 FRONTEND_DIR = BASE_DIR.parent
 logger = logging.getLogger(__name__)
@@ -586,10 +586,11 @@ def enforce_password_policy(password: str) -> None:
 
 
 def card_to_out(card: Card) -> CardOut:
+    display_name = canonical_card_name(card.name)
     return CardOut(
         id=card.id,
         slug=card.slug,
-        name=card.name,
+        name=display_name,
         civilizations=card.civilizations.split("|"),
         cost=card.cost,
         type=card.type,
@@ -602,7 +603,7 @@ def card_to_out(card: Card) -> CardOut:
         illustrator=card.illustrator,
         flavor=card.flavor,
         image_path=format_image_path(card.id),
-        illustration_path=format_illustration_path(card.name),
+        illustration_path=format_illustration_path(display_name),
     )
 
 
@@ -669,9 +670,10 @@ def notification_to_out(notification: Notification) -> NotificationOut:
 
 
 def playmode_serialize_card(card: Card) -> dict:
+    display_name = canonical_card_name(card.name)
     return {
         "id": card.id,
-        "name": card.name,
+        "name": display_name,
         "civilizations": [value for value in (card.civilizations or "").split("|") if value],
         "cost": card.cost,
         "type": card.type,

@@ -7,6 +7,7 @@ from urllib.request import Request, urlopen
 
 from .database import IMAGE_CACHE_DIR
 from .models import Card
+from .utils import canonical_card_name
 
 SEARCH_URL = "https://db.duelmasters.us/search?search_term={query}"
 IMAGE_URL_TEMPLATE = "https://img.duelmasters.us/{image_id}.webp"
@@ -14,13 +15,14 @@ ROW_PATTERN = re.compile(r'<tr class="results-row" data-id="(?P<image_id>\d+)">\
 
 
 def resolve_image_metadata(card: Card) -> tuple[str, str] | None:
-    query = quote_plus(card.name)
+    normalized_lookup_name = canonical_card_name(card.name)
+    query = quote_plus(normalized_lookup_name)
     request = Request(SEARCH_URL.format(query=query), headers={"User-Agent": "Mozilla/5.0"})
     with urlopen(request, timeout=20) as response:
         html = response.read().decode("utf-8", errors="ignore")
 
     matches = ROW_PATTERN.findall(html)
-    normalized_name = card.name.casefold()
+    normalized_name = normalized_lookup_name.casefold()
     for image_id, candidate_name in matches:
         if candidate_name.casefold() == normalized_name:
             return image_id, IMAGE_URL_TEMPLATE.format(image_id=image_id)

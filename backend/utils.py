@@ -3,8 +3,19 @@ from __future__ import annotations
 import re
 import secrets
 
+CARD_NAME_ALIASES = {
+    "Ãœberdragon Bajula": "Uberdragon Bajula",
+    "Ãœberdragon Jabaha": "Uberdragon Jabaha",
+    "Ãœberdragon Zaschack": "Uberdragon Zaschack",
+}
+
+
+def canonical_card_name(value: str) -> str:
+    return CARD_NAME_ALIASES.get(value, value)
+
 
 def slugify(value: str) -> str:
+    value = canonical_card_name(value)
     cleaned = re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")
     return cleaned or "card"
 
