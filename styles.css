@@ -5224,6 +5224,17 @@ body[data-page="playtest"] .playtest-action-overlay .small-button:disabled {
 .playmode-board-panel {
   display: grid;
   gap: 18px;
+  position: relative;
+  padding-top: 76px;
+}
+
+.playmode-exit-fixed {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  z-index: 20;
+  min-width: 104px;
+  box-shadow: 0 18px 36px rgba(139, 38, 38, 0.28);
 }
 
 .playmode-phase-panel {
@@ -5266,6 +5277,26 @@ body[data-page="playtest"] .playtest-action-overlay .small-button:disabled {
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
+}
+
+.playmode-choice-panel {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid rgba(124, 231, 255, 0.24);
+  border-radius: 18px;
+  background: linear-gradient(135deg, rgba(14, 39, 65, 0.9), rgba(5, 18, 33, 0.92));
+  box-shadow: 0 18px 42px rgba(0, 0, 0, 0.28);
+}
+
+.playmode-choice-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.playmode-choice-button {
+  min-width: 150px;
 }
 
 .playmode-seat-panel {
@@ -5378,6 +5409,12 @@ body[data-page="playmode"] .playmode-board-panel {
   border: 1px solid rgba(157, 213, 255, 0.18);
   background: rgba(255,255,255,0.03);
   box-shadow: 0 12px 24px rgba(2, 8, 20, 0.24);
+}
+
+.playmode-mini-card.is-choice-candidate {
+  border-color: rgba(255, 222, 122, 0.92);
+  box-shadow: 0 0 0 3px rgba(255, 222, 122, 0.22), 0 0 28px rgba(255, 222, 122, 0.32);
+  cursor: pointer;
 }
 
 .playmode-mini-card.is-tapped {

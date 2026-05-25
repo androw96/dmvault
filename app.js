@@ -11,6 +11,7 @@ const PLAYTEST_BALLOM_VIDEO_FILE = "ballom-evolve-destroy.mp4";
 const PLAYTEST_CRYSTAL_PALADIN_VIDEO_FILE = "crystal-paladin-evolve.mp4";
 const PLAYTEST_ALCADEIAS_VIDEO_FILE = "alcadeias-evolve.mp4";
 const PROFILE_CACHE_KEY = "paladins-vault-active-profile-cache";
+const PROFILE_DECKS_CACHE_KEY = "paladins-vault-profile-decks-cache";
 const AVATAR_PRESETS = {
   Water: ["Aqua Guard", "Aqua Hulcus", "Emeral", "Crystal Paladin", "Aqua Sniper", "King Tsunami"],
   Darkness: ["Marrow Ooze, the Twister", "Propeller Mutant", "Phantasmal Horror Gigazald", "Deathliger, Lion of Chaos", "Ballom, Master of Death", "Super Necrodragon Abzo Dolba"],
@@ -419,6 +420,34 @@ initialize().catch((error) => {
   setStatus("Paladin's Vault could not finish loading. Please check the backend.", "error");
 });
 
+function scheduleAfterPaint(callback) {
+  const run = () => {
+    if ("requestIdleCallback" in window) {
+      window.requestIdleCallback(callback, { timeout: 1200 });
+    } else {
+      window.setTimeout(callback, 0);
+    }
+  };
+  window.requestAnimationFrame(run);
+}
+
+function renderInitialPageShell() {
+  renderAuthNavigation();
+  renderWelcome();
+  renderProfile();
+  renderProfileDecks();
+  renderContactPage();
+  renderStatusFromQuery();
+  maybeOpenAccountDeleteFromQuery();
+  renderBuilderDeckOptions();
+  renderBuilderEntry();
+  renderPrintDeckOptions();
+  renderPlaymodePage();
+  renderBuilder();
+  renderPrintPages();
+  renderHeaderStats();
+}
+
 async function initialize() {
   setBootLoadingState(true);
   ensureDeckDeleteModal();
@@ -434,9 +463,7 @@ async function initialize() {
   ensureCookieConsentBanner();
   setActiveNav();
   primeCachedProfileState();
-  renderAuthNavigation();
-  renderWelcome();
-  renderProfile();
+  renderInitialPageShell();
   bindEvents();
   if (isPlaytestPage) {
     try {
@@ -455,28 +482,10 @@ async function initialize() {
     }
     return;
   }
-  try {
-    await hydrateProfiles();
-  } catch (error) {
-    console.warn("hydrateProfiles failed", error);
-  }
-  if ((page === "profile" || page === "my-decks") && state.activeProfileId) {
-    try {
-      await loadProfileDecks(state.activeProfileId);
-    } catch (error) {
-      console.warn("loadProfileDecks failed", error);
-    }
-  }
-  renderAuthNavigation();
-  renderWelcome();
-  renderProfile();
-  if (page === "my-decks") {
-    renderProfileDecks();
-  }
-  renderContactPage();
-  setBootLoadingState(false);
   hydrateBuilderPreferences();
   maybeLoadLocalDeck();
+  renderInitialPageShell();
+  setBootLoadingState(false);
   try {
     await hydrateDeckCards();
   } catch (error) {
@@ -494,58 +503,49 @@ async function initialize() {
   }
   maybeStartNewDeckFromQuery();
   maybeOpenImportedDeckFromQuery();
-  renderWelcome();
-  renderAuthNavigation();
-  renderProfile();
-  renderStatusFromQuery();
-  maybeOpenAccountDeleteFromQuery();
-  renderBuilderDeckOptions();
-  renderBuilderEntry();
-  renderPrintDeckOptions();
-  renderPlaymodePage();
-  renderBuilder();
-  renderPrintPages();
-  renderHeaderStats();
-  renderContactPage();
+  renderInitialPageShell();
 
-  const backgroundTasks = [
-    (async () => {
-      if (!needsCards(page)) {
-        return;
-      }
-      await hydrateFilters();
-      const shouldPreloadCards = !isDeckEditorPage || state.filters.search || state.filters.civilization !== "all" || state.filters.type !== "all" || state.filters.maxCost !== state.filterDefaults.maxCost;
-      if (shouldPreloadCards) {
-        await loadCards(isDeckEditorPage ? 60 : 160);
-      }
-    })(),
-    page === "profile" ? loadAllCards() : Promise.resolve(),
-    needsProfileDecks(page) && state.activeProfileId ? loadProfileDecks(state.activeProfileId) : Promise.resolve(),
-    state.activeProfileId ? loadNotifications() : Promise.resolve(),
-    needsExploreDecks(page) ? loadExploreDecks() : Promise.resolve(),
-    page === "profile" ? maybeLoadViewedProfile() : Promise.resolve(),
-    isCardDetailPage ? loadCardDetailPage() : Promise.resolve(),
-    isHistoryPage ? loadHistoryPage() : Promise.resolve(),
-    isPlaymodePage && state.activeProfileId ? loadPlaymodeMatches() : Promise.resolve(),
-    isPlaymodePage ? maybeLoadPlaymodeMatchFromQuery() : Promise.resolve(),
-    page === "admin" && state.activeProfileId ? loadAdminOverview() : Promise.resolve(),
-    state.loadedShareId && state.deckHistory.length === 0 ? loadDeckHistory(state.loadedShareId) : Promise.resolve()
-  ];
-
-  Promise.allSettled(backgroundTasks).then(() => {
-    renderNotifications();
-    renderProfile();
-    renderProfileDecks();
-    renderExploreDecks();
-    renderExploreUsers();
-    renderExploreSections();
-    renderAvatarPresetChoosers();
-    renderCards();
-    renderDeckHistory();
-    renderPlaytestSandbox();
-    renderPlaymodePage();
-    renderHeaderStats();
-    renderAdminPage();
+  scheduleAfterPaint(() => {
+    const backgroundTasks = [
+      hydrateProfiles(),
+      (async () => {
+        if (!needsCards(page)) {
+          return;
+        }
+        await hydrateFilters();
+        const shouldPreloadCards = !isDeckEditorPage || state.filters.search || state.filters.civilization !== "all" || state.filters.type !== "all" || state.filters.maxCost !== state.filterDefaults.maxCost;
+        if (shouldPreloadCards) {
+          await loadCards(isDeckEditorPage ? 60 : 160);
+        }
+      })(),
+      page === "profile" ? loadAllCards() : Promise.resolve(),
+      needsProfileDecks(page) && state.activeProfileId ? loadProfileDecks(state.activeProfileId) : Promise.resolve(),
+      state.activeProfileId ? loadNotifications() : Promise.resolve(),
+      needsExploreDecks(page) ? loadExploreDecks() : Promise.resolve(),
+      page === "profile" ? maybeLoadViewedProfile() : Promise.resolve(),
+      isCardDetailPage ? loadCardDetailPage() : Promise.resolve(),
+      isHistoryPage ? loadHistoryPage() : Promise.resolve(),
+      isPlaymodePage && state.activeProfileId ? loadPlaymodeMatches() : Promise.resolve(),
+      isPlaymodePage ? maybeLoadPlaymodeMatchFromQuery() : Promise.resolve(),
+      page === "admin" && state.activeProfileId ? loadAdminOverview() : Promise.resolve(),
+      state.loadedShareId && state.deckHistory.length === 0 ? loadDeckHistory(state.loadedShareId) : Promise.resolve()
+    ];
+    Promise.allSettled(backgroundTasks).then(() => {
+      renderNotifications();
+      renderAuthNavigation();
+      renderProfile();
+      renderProfileDecks();
+      renderExploreDecks();
+      renderExploreUsers();
+      renderExploreSections();
+      renderAvatarPresetChoosers();
+      renderCards();
+      renderDeckHistory();
+      renderPlaytestSandbox();
+      renderPlaymodePage();
+      renderHeaderStats();
+      renderAdminPage();
+    });
   });
 }
 
@@ -685,6 +685,40 @@ function isEvolutionCard(card) {
   return /\bevolution\b/i.test(`${card?.type || ""} ${card?.text || ""}`);
 }
 
+function isVortexEvolutionCard(card) {
+  return /\bvortex\s+evolution\b/i.test(`${card?.text || ""}`);
+}
+
+function isPlaytestCreatureCard(card) {
+  return /\bcreature\b/i.test(card?.type || "");
+}
+
+function playtestCardHasKeyword(card, keyword) {
+  return `${card?.name || ""} ${card?.type || ""} ${card?.race_label || ""} ${card?.text || ""}`
+    .toLowerCase()
+    .includes(String(keyword || "").toLowerCase());
+}
+
+function playtestCardPowerValue(card) {
+  const match = String(card?.power || "").match(/\d+/);
+  return match ? Number(match[0]) : 0;
+}
+
+function playtestCardIsBlocker(card) {
+  return /\bblocker\b/i.test(card?.text || "");
+}
+
+function playtestCardIsLight(card) {
+  return playtestCardCivilizations(card).some((civilization) => normalizeName(civilization) === "light");
+}
+
+function playtestAlcadeiasLocksSpell(card) {
+  if (!isSpellCard(card) || playtestCardIsLight(card)) {
+    return false;
+  }
+  return (state.playtest.battle || []).some((entry) => normalizeName(entry.card?.name || "") === "alcadeias lord of spirits");
+}
+
 function normalizePlaytestRequirement(value) {
   return normalizeName(String(value || "")
     .replace(/\bcreatures?\b/gi, "")
@@ -711,7 +745,53 @@ function extractEvolutionRequirement(card) {
   return normalizePlaytestRequirement(match[1]);
 }
 
+function extractVortexEvolutionRequirements(card) {
+  const text = String(card?.text || "");
+  const match = text.match(/vortex\s+evolution[\s\S]*?put on one of your\s+(.+?)\s+and\s+one of your\s+(.+?)(?:\.|$)/i);
+  if (!match) {
+    return [];
+  }
+  return [normalizePlaytestRequirement(match[1]), normalizePlaytestRequirement(match[2])].filter(Boolean);
+}
+
+function playtestCardMatchesRequirement(card, requirement) {
+  const requirementTokens = canonicalPlaytestTokens(requirement);
+  if (!requirementTokens.length) {
+    return false;
+  }
+  const candidateTokens = new Set([
+    ...canonicalPlaytestTokens(card?.race_label || ""),
+    ...canonicalPlaytestTokens(card?.type || "")
+  ]);
+  return requirementTokens.every((token) => candidateTokens.has(token));
+}
+
+function findVortexEvolutionPair(card) {
+  const [firstRequirement, secondRequirement] = extractVortexEvolutionRequirements(card);
+  if (!firstRequirement || !secondRequirement) {
+    return null;
+  }
+  const battle = state.playtest.battle || [];
+  for (const first of battle) {
+    if (!playtestCardMatchesRequirement(first.card, firstRequirement)) {
+      continue;
+    }
+    for (const second of battle) {
+      if (second.uid === first.uid) {
+        continue;
+      }
+      if (playtestCardMatchesRequirement(second.card, secondRequirement)) {
+        return [first, second];
+      }
+    }
+  }
+  return null;
+}
+
 function battleCardsEligibleForEvolution(card) {
+  if (isVortexEvolutionCard(card)) {
+    return [];
+  }
   const requirement = extractEvolutionRequirement(card);
   const evolutionRace = normalizePlaytestRequirement(card?.race_label || "");
   const requirementTokens = canonicalPlaytestTokens(requirement);
@@ -731,6 +811,10 @@ function battleCardsEligibleForEvolution(card) {
 }
 
 function beginEvolutionPlay(card) {
+  if (isVortexEvolutionCard(card.card)) {
+    completeVortexEvolutionPlay(card);
+    return;
+  }
   const eligible = battleCardsEligibleForEvolution(card.card);
   if (!eligible.length) {
     setStatus(`No valid evolution target is in your Battle Zone for ${card.card.name}.`, "error");
@@ -743,6 +827,43 @@ function beginEvolutionPlay(card) {
   state.playtestSelected = null;
   renderPlaytestSandbox();
   setStatus(`Select a Battle Zone card to evolve into ${card.card.name}.`, "info");
+}
+
+function completeVortexEvolutionPlay(card) {
+  const pair = findVortexEvolutionPair(card.card);
+  if (!pair) {
+    const requirements = extractVortexEvolutionRequirements(card.card).join(" + ");
+    setStatus(`No valid Vortex Evolution pair is in your Battle Zone for ${card.card.name}${requirements ? ` (${requirements})` : ""}.`, "error");
+    return;
+  }
+  if (!consumePlaytestMana(card.card)) {
+    setStatus(`You do not have enough charged mana to evolve ${card.card.name}.`, "error");
+    renderPlaytestSandbox();
+    return;
+  }
+  const handIndex = state.playtest.hand.findIndex((entry) => entry.uid === card.uid);
+  if (handIndex === -1) {
+    return;
+  }
+  const [playedEvolution] = state.playtest.hand.splice(handIndex, 1);
+  const pairUids = new Set(pair.map((entry) => entry.uid));
+  state.playtest.battle = (state.playtest.battle || []).filter((entry) => !pairUids.has(entry.uid));
+  const evolvedEntry = {
+    ...playedEvolution,
+    faceDown: false,
+    tapped: false,
+    underlays: pair.flatMap((entry) => [
+      { ...entry, underlays: [] },
+      ...(entry.underlays || []).map((underlay) => ({ ...underlay, underlays: [] }))
+    ])
+  };
+  state.playtest.battle.push(evolvedEntry);
+  const messages = resolvePlaytestBattleEntryAbilities(evolvedEntry);
+  state.playtestEvolutionPick = null;
+  state.playtestSelected = null;
+  persistPlaytestState();
+  renderPlaytestSandbox();
+  setStatus(messages.length ? `${playedEvolution.card.name}: ${messages.join(" ")}` : `${playedEvolution.card.name} vortex evolved successfully.`, "success");
 }
 
 function completeEvolutionPlay(targetUid) {
@@ -781,10 +902,7 @@ function completeEvolutionPlay(targetUid) {
       }))
     ]
   });
-  let ballomDestroyed = [];
-  if (normalizeName(playedEvolution.card.name) === "ballom master of death") {
-    ballomDestroyed = resolveBallomBattlefieldWipe(targetUid);
-  }
+  const messages = resolvePlaytestBattleEntryAbilities(playedEvolution);
   state.playtestEvolutionPick = null;
   state.playtestSelected = null;
   persistPlaytestState();
@@ -797,11 +915,46 @@ function completeEvolutionPlay(targetUid) {
   } else if (evolvedName === "alcadeias lord of spirits") {
     playAlcadeiasEvolutionAnimation();
   }
-  if (ballomDestroyed.length) {
-    setStatus(`${playedEvolution.card.name} evolved and destroyed ${ballomDestroyed.join(", ")}.`, "success");
+  if (messages.length) {
+    setStatus(`${playedEvolution.card.name}: ${messages.join(" ")}`, "success");
   } else {
     setStatus(`${playedEvolution.card.name} evolved successfully.`, "success");
   }
+}
+
+function resolvePlaytestBattleEntryAbilities(entry) {
+  const name = normalizeName(entry.card?.name || "");
+  const messages = [];
+  if (name === "ballom master of death") {
+    const destroyed = resolveBallomBattlefieldWipe(entry.uid);
+    if (destroyed.length) {
+      messages.push(`Destroyed ${destroyed.join(", ")}.`);
+    }
+  }
+  if (name === "crystal paladin") {
+    const bounced = resolveCrystalPaladinBlockerBounce(entry.uid);
+    if (bounced.length) {
+      messages.push(`Returned blockers to hand: ${bounced.join(", ")}.`);
+    }
+  }
+  if (name === "bombazar dragon of destiny" || name === "bombazaar dragon of destiny") {
+    const destroyed = resolveBombazarPowerWipe(entry.uid);
+    if (destroyed.length) {
+      messages.push(`Destroyed other 6000-power creatures: ${destroyed.join(", ")}.`);
+    }
+    messages.push("Extra-turn / lose-at-end reminder added for manual Sandbox tracking.");
+  }
+  return messages;
+}
+
+function flattenPlaytestStack(entry, options = {}) {
+  return [entry, ...(entry.underlays || [])].map((stackEntry) => ({
+    ...stackEntry,
+    underlays: [],
+    faceDown: Boolean(options.faceDown ?? false),
+    tapped: Boolean(options.tapped ?? false),
+    manaProduced: []
+  }));
 }
 
 function resolveBallomBattlefieldWipe(ballomUid) {
@@ -816,11 +969,7 @@ function resolveBallomBattlefieldWipe(ballomUid) {
     const isCreature = /\bcreature\b/i.test(entry.card?.type || "");
     const hasDarkness = civilizations.some((civilization) => normalizeName(civilization) === "darkness");
     if (isCreature && !hasDarkness) {
-      state.playtest.graveyard.push({
-        ...entry,
-        faceDown: false,
-        tapped: false
-      });
+      state.playtest.graveyard.push(...flattenPlaytestStack(entry));
       destroyed.push(entry.card?.name || "Unknown creature");
       continue;
     }
@@ -828,6 +977,71 @@ function resolveBallomBattlefieldWipe(ballomUid) {
   }
   state.playtest.battle = survivors;
   return destroyed;
+}
+
+function resolveCrystalPaladinBlockerBounce(sourceUid) {
+  const survivors = [];
+  const bounced = [];
+  for (const entry of state.playtest.battle || []) {
+    if (entry.uid === sourceUid) {
+      survivors.push(entry);
+      continue;
+    }
+    if (isPlaytestCreatureCard(entry.card) && playtestCardIsBlocker(entry.card)) {
+      state.playtest.hand.push(...flattenPlaytestStack(entry));
+      bounced.push(entry.card?.name || "Unknown blocker");
+      continue;
+    }
+    survivors.push(entry);
+  }
+  state.playtest.battle = survivors;
+  return bounced;
+}
+
+function resolveBombazarPowerWipe(sourceUid) {
+  const survivors = [];
+  const destroyed = [];
+  for (const entry of state.playtest.battle || []) {
+    if (entry.uid === sourceUid) {
+      survivors.push(entry);
+      continue;
+    }
+    if (isPlaytestCreatureCard(entry.card) && playtestCardPowerValue(entry.card) === 6000) {
+      state.playtest.graveyard.push(...flattenPlaytestStack(entry));
+      destroyed.push(entry.card?.name || "Unknown creature");
+      continue;
+    }
+    survivors.push(entry);
+  }
+  state.playtest.battle = survivors;
+  return destroyed;
+}
+
+function playPlaytestCreatureFromHand(uid) {
+  const handIndex = state.playtest.hand.findIndex((entry) => entry.uid === uid);
+  if (handIndex === -1) {
+    return;
+  }
+  const card = state.playtest.hand[handIndex];
+  if (!consumePlaytestMana(card.card)) {
+    setStatus(`You do not have enough charged mana to play ${card.card.name}.`, "error");
+    renderPlaytestSandbox();
+    return;
+  }
+  const [playedCard] = state.playtest.hand.splice(handIndex, 1);
+  const battleEntry = {
+    ...playedCard,
+    faceDown: false,
+    tapped: false,
+    summoningSick: isPlaytestCreatureCard(playedCard.card) && !playtestCardHasKeyword(playedCard.card, "speed attacker"),
+    underlays: playedCard.underlays || []
+  };
+  state.playtest.battle.push(battleEntry);
+  const messages = resolvePlaytestBattleEntryAbilities(battleEntry);
+  state.playtestSelected = null;
+  persistPlaytestState();
+  renderPlaytestSandbox();
+  setStatus(messages.length ? `${playedCard.card.name}: ${messages.join(" ")}` : `${playedCard.card.name} entered the Battle Zone.`, "success");
 }
 
 function closePlaytestCinematicModal() {
@@ -1316,6 +1530,10 @@ function playtestActionDefinitions(zoneName, card) {
             return;
           }
           if (isSpellCard(card.card)) {
+            if (playtestAlcadeiasLocksSpell(card.card)) {
+              setStatus("Alcadeias, Lord of Spirits prevents non-light spells from being cast.", "error");
+              return;
+            }
             consumePlaytestMana(card.card);
             if (isChargerSpellCard(card.card)) {
               movePlaytestCard("hand", card.uid, "mana", { faceDown: false, resetTapped: true });
@@ -1328,8 +1546,7 @@ function playtestActionDefinitions(zoneName, card) {
             beginEvolutionPlay(card);
             return;
           }
-          consumePlaytestMana(card.card);
-          movePlaytestCard("hand", card.uid, "battle", { faceDown: false, resetTapped: true });
+          playPlaytestCreatureFromHand(card.uid);
         }
       },
       { label: "Charge", run: () => movePlaytestCard("hand", card.uid, "mana", { faceDown: false, resetTapped: true }) },
@@ -1754,15 +1971,24 @@ function renderPlaymodeZoneCards(cards, zoneName, { hidden = false, count = 0 } 
     return `<p class="hero-text playmode-zone-empty">Empty</p>`;
   }
   return cards.map((card) => {
+    const pendingCandidate = playmodePendingCandidate(zoneName, card.uid);
     const image = card.face_down
       ? `<span class="playmode-mini-back" style="background-image:url('${playtestCoverImageUrl()}')"></span>`
-      : `<img class="playmode-mini-image" src="${escapeHtml(resolveAssetUrl(card.image_path || DEFAULT_LOGO_URL))}" alt="${escapeHtml(card.name)}">`;
+      : `<img class="playmode-mini-image" src="${escapeHtml(resolveAssetUrl(card.image_path || DEFAULT_LOGO_URL))}" alt="${escapeHtml(card.name)}" loading="lazy" decoding="async">`;
     return `
-      <article class="playmode-mini-card${card.tapped ? " is-tapped" : ""}${card.face_down ? " is-facedown" : ""}${zoneName === "mana" ? " is-mana" : ""}">
+      <article class="playmode-mini-card${card.tapped ? " is-tapped" : ""}${card.face_down ? " is-facedown" : ""}${zoneName === "mana" ? " is-mana" : ""}${pendingCandidate ? " is-choice-candidate" : ""}" data-playmode-zone="${escapeHtml(zoneName)}" data-playmode-card-uid="${escapeHtml(card.uid || "")}">
         ${image}
       </article>
     `;
   }).join("");
+}
+
+function playmodePendingCandidate(zoneName, uid) {
+  const choice = state.playmodeMatch?.pending_choice;
+  if (!choice || choice.kind === "hidden") {
+    return null;
+  }
+  return (choice.candidates || []).find((candidate) => candidate.zone === zoneName && candidate.uid === uid) || null;
 }
 
 function renderPlaymodeSeat(container, player, viewerSeat, adminOverride = false) {
@@ -1806,6 +2032,11 @@ function renderPlaymodeSeat(container, player, viewerSeat, adminOverride = false
       </section>
     </div>
   `;
+  for (const card of container.querySelectorAll("[data-playmode-card-uid]")) {
+    card.addEventListener("click", () => {
+      void handlePlaymodeCardClick(player.seat, card.dataset.playmodeZone, card.dataset.playmodeCardUid);
+    });
+  }
 }
 
 function currentPlaymodePhase() {
@@ -1840,6 +2071,13 @@ function canControlActivePlaymodeSeat() {
   if (state.playmodeMatch.admin_override) {
     return true;
   }
+  if (
+    state.playmodeMatch.pending_choice
+    && state.playmodeMatch.pending_choice.kind !== "hidden"
+    && state.playmodeMatch.viewer_seat === state.playmodeMatch.pending_choice.controller_seat
+  ) {
+    return true;
+  }
   return state.playmodeMatch.viewer_seat === state.playmodeMatch.active_seat;
 }
 
@@ -1861,16 +2099,155 @@ function playmodeSeatKey(seat) {
   return seat === 2 ? "player_two" : "player_one";
 }
 
-function nextPlaymodePhase(phase) {
-  const index = PLAYMODE_PHASES.indexOf(phase);
-  if (index === -1 || index === PLAYMODE_PHASES.length - 1) {
-    return "end";
-  }
-  return PLAYMODE_PHASES[index + 1];
-}
-
 function untapPlaymodeZone(zone = []) {
   return (zone || []).map((entry) => ({ ...entry, tapped: false }));
+}
+
+function playmodeCardIsSpell(card) {
+  return String(card?.type || "").toLowerCase().includes("spell");
+}
+
+function playmodeCardIsCreature(card) {
+  const type = String(card?.type || "").toLowerCase();
+  const name = String(card?.name || "").toLowerCase();
+  return type.includes("creature") || name.includes("bombazar") || name.includes("bombazaar");
+}
+
+function playmodeCardHasKeyword(card, keyword) {
+  const haystack = `${card?.name || ""} ${card?.type || ""} ${card?.race_label || ""} ${card?.text || ""}`;
+  return haystack.toLowerCase().includes(String(keyword || "").toLowerCase());
+}
+
+function playmodeCardHasSummoningSickness(card) {
+  if (!playmodeCardIsCreature(card)) {
+    return false;
+  }
+  const type = String(card?.type || "").toLowerCase();
+  return !type.includes("evolution") && !playmodeCardHasKeyword(card, "speed attacker");
+}
+
+function setPlaymodeStatus(message) {
+  if (elements.playmodeStatus && message) {
+    elements.playmodeStatus.textContent = message;
+  }
+}
+
+function findPlaymodeZoneCard(zone = [], uid) {
+  const index = (zone || []).findIndex((entry) => entry.uid === uid);
+  return { index, card: index >= 0 ? zone[index] : null };
+}
+
+function normalizePlaymodeCardEntry(viewCard) {
+  return {
+    uid: viewCard.uid,
+    card: {
+      id: viewCard.id,
+      name: viewCard.name,
+      civilizations: viewCard.civilizations || [],
+      cost: viewCard.cost || 0,
+      type: viewCard.type || "",
+      race_label: viewCard.race_label || "",
+      text: viewCard.text || "",
+      power: viewCard.power || null,
+      image_path: viewCard.image_path || null
+    },
+    tapped: Boolean(viewCard.tapped),
+    faceDown: Boolean(viewCard.face_down),
+    manaProduced: [],
+    underlays: []
+  };
+}
+
+function syncPlaymodeViewCardsToState(matchState, seatKey, sourceZones) {
+  const target = matchState[seatKey] || {};
+  for (const zoneName of ["hand", "shields", "mana", "battle", "graveyard"]) {
+    target[zoneName] = (sourceZones?.[zoneName] || []).map(normalizePlaymodeCardEntry);
+  }
+  target.drawPile = Array.from({ length: sourceZones?.deck_count || 0 }, (_, index) => ({
+    uid: `hidden-library-${index}`,
+    card: {},
+    tapped: false,
+    faceDown: true,
+    manaProduced: [],
+    underlays: []
+  }));
+  target.manaPool = [...(sourceZones?.mana_pool || [])];
+  target.ready = true;
+  matchState[seatKey] = target;
+}
+
+function activePlaymodeMatchStateFromView() {
+  const matchState = clonePlaymodeStateFromView();
+  if (!matchState || !state.playmodeMatch) {
+    return null;
+  }
+  syncPlaymodeViewCardsToState(matchState, "player_one", state.playmodeMatch.player_one?.zones);
+  if (state.playmodeMatch.admin_override || state.playmodeMatch.viewer_seat === 2) {
+    syncPlaymodeViewCardsToState(matchState, "player_two", state.playmodeMatch.player_two?.zones);
+  }
+  return matchState;
+}
+
+async function handlePlaymodeCardClick(seat, zoneName, uid) {
+  if (!state.playmodeMatch || !state.activeProfileId || !canControlActivePlaymodeSeat()) {
+    setPlaymodeStatus("It is not your turn yet, or this board cannot be controlled from this view.");
+    return;
+  }
+  const pendingCandidate = playmodePendingCandidate(zoneName, uid);
+  if (pendingCandidate) {
+    await runPlaymodeAction({
+      profile_id: state.activeProfileId,
+      action: "choose_pending",
+      seat: state.playmodeMatch.pending_choice?.controller_seat || state.playmodeMatch.active_seat,
+      target_seat: pendingCandidate.seat,
+      target_uid: pendingCandidate.uid
+    });
+    return;
+  }
+  if (state.playmodeMatch.pending_choice) {
+    setPlaymodeStatus(state.playmodeMatch.pending_choice.message || "Resolve the pending choice first.");
+    return;
+  }
+  const phase = currentPlaymodePhase();
+  const activeSeat = state.playmodeMatch.active_seat;
+  let action = null;
+  const body = { profile_id: state.activeProfileId, seat, zone: zoneName, uid };
+  if (seat === activeSeat && zoneName === "mana") {
+    action = "tap_mana";
+  } else if (seat === activeSeat && zoneName === "hand" && phase === "charge") {
+    action = "charge";
+  } else if (seat === activeSeat && zoneName === "hand" && phase === "play") {
+    action = "play_card";
+  } else if (seat === activeSeat && zoneName === "battle" && phase === "attack") {
+    action = "attack";
+  } else if (seat !== activeSeat && zoneName === "shields" && phase === "attack") {
+    action = "break_shield";
+    body.seat = activeSeat;
+    body.target_seat = seat;
+    body.target_uid = uid;
+  }
+  if (!action) {
+    setPlaymodeStatus(`This card cannot be used in ${playmodePhaseLabel(phase)} phase.`);
+    return;
+  }
+  await runPlaymodeAction({ ...body, action });
+}
+
+async function runPlaymodeAction(payload) {
+  if (!state.playmodeMatch || !state.activeProfileId) {
+    return;
+  }
+  try {
+    state.playmodeMatch = await fetchJson(`${API_BASE}/playmode/matches/${encodeURIComponent(state.playmodeMatch.public_id)}/action`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+    await loadPlaymodeMatches();
+    renderPlaymodePage();
+  } catch (error) {
+    setPlaymodeStatus(error.message || "Playmode action failed.");
+  }
 }
 
 async function savePlaymodeMatchState({ matchState, moveSummary = null, winnerSeat = null }) {
@@ -1895,68 +2272,14 @@ async function savePlaymodeMatchState({ matchState, moveSummary = null, winnerSe
 }
 
 async function advancePlaymodePhase() {
-  if (!state.playmodeMatch || !canControlActivePlaymodeSeat()) {
+  if (!state.playmodeMatch || !state.activeProfileId || !canControlActivePlaymodeSeat()) {
     return;
   }
-  const matchState = clonePlaymodeStateFromView();
-  if (!matchState) {
-    return;
-  }
-  const seatKey = playmodeSeatKey(matchState.active_seat);
-  const activeSeatState = matchState[seatKey] || {};
-  const phase = currentPlaymodePhase();
-
-  if (phase === "untap") {
-    activeSeatState.mana = untapPlaymodeZone(activeSeatState.mana);
-    activeSeatState.battle = untapPlaymodeZone(activeSeatState.battle);
-    activeSeatState.manaPool = [];
-    activeSeatState.turn = matchState.current_turn;
-    matchState.current_phase = "draw";
-    await savePlaymodeMatchState({ matchState, moveSummary: `Player ${matchState.active_seat} untapped all mana and creatures.` });
-    return;
-  }
-
-  if (phase === "draw") {
-    const drawPile = [...(activeSeatState.drawPile || [])];
-    if (!drawPile.length) {
-      const winnerSeat = matchState.active_seat === 1 ? 2 : 1;
-      matchState.winner_seat = winnerSeat;
-      await savePlaymodeMatchState({
-        matchState,
-        moveSummary: `Player ${matchState.active_seat} decked out during draw phase.`,
-        winnerSeat
-      });
-      return;
-    }
-    const drawn = { ...drawPile.shift(), faceDown: false };
-    activeSeatState.drawPile = drawPile;
-    activeSeatState.hand = [...(activeSeatState.hand || []), drawn];
-    matchState.current_phase = "charge";
-    await savePlaymodeMatchState({ matchState, moveSummary: `Player ${matchState.active_seat} drew a card.` });
-    return;
-  }
-
-  if (phase === "charge") {
-    matchState.current_phase = "play";
-    await savePlaymodeMatchState({ matchState, moveSummary: `Player ${matchState.active_seat} moved to play phase.` });
-    return;
-  }
-
-  if (phase === "play") {
-    matchState.current_phase = "attack";
-    await savePlaymodeMatchState({ matchState, moveSummary: `Player ${matchState.active_seat} moved to attack phase.` });
-    return;
-  }
-
-  if (phase === "attack") {
-    matchState.current_phase = "end";
-    await savePlaymodeMatchState({ matchState, moveSummary: `Player ${matchState.active_seat} finished the attack phase.` });
-    return;
-  }
-
-  if (phase === "end") {
-    await endPlaymodeTurn();
-  }
+  await runPlaymodeAction({
+    profile_id: state.activeProfileId,
+    action: "advance_phase",
+    seat: state.playmodeMatch.active_seat
+  });
 }
 
 async function endPlaymodeTurn() {
@@ -1995,7 +2318,14 @@ function renderPlaymodePhasePanel() {
     elements.playmodePhaseTitle.textContent = `${playmodePhaseLabel(phase)} Phase`;
   }
   if (elements.playmodePhaseCopy) {
-    elements.playmodePhaseCopy.textContent = `Player ${activeSeat} turn • Flow: Untap → Draw → Charge → Play → Attack → End`;
+    elements.playmodePhaseCopy.textContent = ({
+      untap: `Player ${activeSeat} turn • Untap all tapped mana and creatures.`,
+      draw: `Player ${activeSeat} turn • Draw one card. Deck-out is checked here.`,
+      charge: `Player ${activeSeat} turn • Click a card in hand to charge it, or skip to play phase.`,
+      play: `Player ${activeSeat} turn • Click a card in hand to play it.`,
+      attack: `Player ${activeSeat} turn • Click a creature in battle zone to tap it as an attacker.`,
+      end: `Player ${activeSeat} turn • Pass to the opponent.`
+    })[phase] || `Player ${activeSeat} turn`;
   }
   if (elements.playmodePhaseTrack) {
     elements.playmodePhaseTrack.replaceChildren();
@@ -2017,6 +2347,69 @@ function renderPlaymodePhasePanel() {
       attack: "Finish Attack",
       end: "Pass Turn"
     })[phase] || "Advance Phase";
+  }
+  renderPlaymodePendingChoicePanel();
+}
+
+function renderPlaymodePendingChoicePanel() {
+  if (!elements.playmodePhasePanel) {
+    return;
+  }
+  let panel = elements.playmodePhasePanel.querySelector("[data-playmode-choice-panel]");
+  if (!panel) {
+    panel = document.createElement("div");
+    panel.dataset.playmodeChoicePanel = "true";
+    panel.className = "playmode-choice-panel";
+    elements.playmodePhasePanel.append(panel);
+  }
+  const choice = state.playmodeMatch?.pending_choice;
+  panel.replaceChildren();
+  panel.hidden = !choice;
+  if (!choice) {
+    return;
+  }
+  const title = document.createElement("strong");
+  title.textContent = choice.message || "Resolve pending choice";
+  panel.append(title);
+  if (choice.kind === "hidden") {
+    const note = document.createElement("p");
+    note.className = "hero-text";
+    note.textContent = "Waiting for the opponent to choose.";
+    panel.append(note);
+    return;
+  }
+  const list = document.createElement("div");
+  list.className = "playmode-choice-list";
+  for (const candidate of choice.candidates || []) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "ghost-button playmode-choice-button";
+    button.textContent = candidate.name || "Choose card";
+    button.addEventListener("click", () => {
+      void runPlaymodeAction({
+        profile_id: state.activeProfileId,
+        action: "choose_pending",
+        seat: choice.controller_seat || state.playmodeMatch.active_seat,
+        target_seat: candidate.seat,
+        target_uid: candidate.uid
+      });
+    });
+    list.append(button);
+  }
+  panel.append(list);
+  if (choice.kind === "blocker") {
+    const pass = document.createElement("button");
+    pass.type = "button";
+    pass.className = "primary-button";
+    pass.textContent = "Pass block";
+    pass.addEventListener("click", () => {
+      void runPlaymodeAction({
+        profile_id: state.activeProfileId,
+        action: "pass_pending",
+        seat: choice.controller_seat || state.playmodeMatch.active_seat
+      });
+    });
+    panel.append(pass);
   }
 }
 
@@ -3258,10 +3651,15 @@ async function loadProfileDecks(profileId) {
     renderPrintDeckOptions();
     return;
   }
-  const payload = await fetchJson(withViewer(`${API_BASE}/profiles/${profileId}`));
-  state.activeProfileDetail = payload;
-  state.profileDecks = payload.decks;
+  const payload = await fetchJson(withViewer(`${API_BASE}/profiles/${profileId}/decks`));
+  state.activeProfileDetail = {
+    ...(state.activeProfileDetail || {}),
+    decks: payload.decks || [],
+    liked_decks: payload.liked_decks || [],
+  };
+  state.profileDecks = payload.decks || [];
   state.likedDecks = payload.liked_decks || [];
+  persistProfileDecksCache(profileId);
   renderBuilderDeckOptions();
   renderBuilderEntry();
   renderPrintDeckOptions();
@@ -6752,6 +7150,7 @@ function logoutProfile() {
   state.deckReadOnly = Boolean(state.deckOwnerId);
   window.localStorage.removeItem(PROFILE_STORAGE_KEY);
   window.localStorage.removeItem(PROFILE_CACHE_KEY);
+  window.localStorage.removeItem(PROFILE_DECKS_CACHE_KEY);
   renderBuilderDeckOptions();
   renderBuilderEntry();
   renderWelcome();
@@ -7000,6 +7399,7 @@ function primeCachedProfileState() {
   if (storedId && !state.activeProfileId) {
     state.activeProfileId = storedId;
   }
+  primeCachedProfileDecks(storedId);
 }
 
 function persistActiveProfileCache() {
@@ -7020,6 +7420,38 @@ function persistActiveProfileCache() {
     follower_count: profile.follower_count ?? 0,
     following_count: profile.following_count ?? 0
   }));
+}
+
+function primeCachedProfileDecks(profileId) {
+  if (!profileId) {
+    return;
+  }
+  try {
+    const raw = window.localStorage.getItem(PROFILE_DECKS_CACHE_KEY);
+    if (!raw) {
+      return;
+    }
+    const parsed = JSON.parse(raw);
+    if (Number(parsed?.profile_id) !== Number(profileId)) {
+      return;
+    }
+    state.profileDecks = Array.isArray(parsed.decks) ? parsed.decks : [];
+    state.likedDecks = Array.isArray(parsed.liked_decks) ? parsed.liked_decks : [];
+  } catch {}
+}
+
+function persistProfileDecksCache(profileId) {
+  if (!profileId) {
+    return;
+  }
+  try {
+    window.localStorage.setItem(PROFILE_DECKS_CACHE_KEY, JSON.stringify({
+      profile_id: profileId,
+      cached_at: Date.now(),
+      decks: state.profileDecks || [],
+      liked_decks: state.likedDecks || []
+    }));
+  } catch {}
 }
 
 function uniqueDuplicateTitle(baseTitle) {

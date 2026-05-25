@@ -177,6 +177,11 @@ class ProfileDetailOut(ProfileOut):
     liked_decks: list[DeckSummaryOut] = []
 
 
+class ProfileDecksResponse(BaseModel):
+    decks: list[DeckSummaryOut]
+    liked_decks: list[DeckSummaryOut] = []
+
+
 class DeckListResponse(BaseModel):
     items: list[DeckSummaryOut]
 
@@ -314,8 +319,20 @@ class PlaymodeMatchUpdateIn(BaseModel):
     winner_seat: int | None = None
 
 
+class PlaymodeActionIn(BaseModel):
+    profile_id: int
+    action: str
+    seat: int | None = None
+    zone: str | None = None
+    uid: str | None = None
+    target_seat: int | None = None
+    target_uid: str | None = None
+    civilization: str | None = None
+
+
 class PlaymodeCardViewOut(BaseModel):
     uid: str
+    id: int | None = None
     name: str
     civilizations: list[str]
     cost: int
@@ -378,6 +395,7 @@ class PlaymodeMatchViewOut(BaseModel):
     current_turn: int
     active_seat: int
     current_phase: str
+    pending_choice: dict | None = None
     viewer_seat: int | None = None
     admin_override: bool = False
     deadline_label: str | None = None
