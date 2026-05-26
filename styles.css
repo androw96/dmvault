@@ -5747,7 +5747,7 @@ body.playmode-match-focus .playmode-board-grid {
 }
 
 .playmode-mini-card.is-mana.is-tapped {
-  transform: rotate(90deg);
+  transform: rotate(270deg);
 }
 
 .playmode-mini-image,
