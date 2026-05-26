@@ -39,6 +39,10 @@
                   <option value="async">24h async</option>
                 </select>
               </label>
+              <label class="field">
+                <span>Invite player (optional)</span>
+                <input id="playmode-invite-username" type="text" placeholder="Username for a private match">
+              </label>
               <button id="playmode-create-button" type="button" class="primary-button">Create Playmode Match</button>
             </div>
           </div>
@@ -62,7 +66,7 @@
           </div>
         </section>
 
-        <section class="panel">
+        <section class="panel playmode-match-list-panel">
           <div class="panel-header">
             <div>
               <p class="section-label">Your Matches</p>

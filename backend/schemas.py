@@ -302,6 +302,7 @@ class PlaymodeMatchCreateIn(BaseModel):
     profile_id: int
     deck_public_id: str
     mode: str = "live"
+    invite_username: str | None = None
 
 
 class PlaymodeMatchJoinIn(BaseModel):

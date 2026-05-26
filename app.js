@@ -141,6 +141,8 @@ const state = {
   playtestEvolutionPick: null,
   playmodeMatches: [],
   playmodeMatch: null,
+  playmodePollTimer: null,
+  playmodeGraveyardOpen: {},
   playmodeLastSoundSignature: null
 };
 
@@ -382,6 +384,7 @@ const elements = {
   playmodePanel: document.querySelector("#playmode-panel"),
   playmodeDeckSelect: document.querySelector("#playmode-deck-select"),
   playmodeModeSelect: document.querySelector("#playmode-mode-select"),
+  playmodeInviteUsername: document.querySelector("#playmode-invite-username"),
   playmodeCreateButton: document.querySelector("#playmode-create-button"),
   playmodeOpenCode: document.querySelector("#playmode-open-code"),
   playmodeOpenButton: document.querySelector("#playmode-open-button"),
@@ -1958,6 +1961,99 @@ async function maybeLoadPlaymodeMatchFromQuery() {
   state.playmodeMatch = await fetchJson(`${API_BASE}/playmode/matches/${encodeURIComponent(matchId)}${suffix}`);
 }
 
+function hasPlaymodeMatchRoute() {
+  return Boolean(new URLSearchParams(window.location.search).get("match"));
+}
+
+function playmodeMatchUrl(matchId) {
+  return `${playmodePagePath()}?match=${encodeURIComponent(matchId)}`;
+}
+
+function navigateToPlaymodeMatch(matchId, { replace = false } = {}) {
+  const url = playmodeMatchUrl(matchId);
+  if (replace) {
+    window.location.replace(url);
+  } else {
+    window.location.assign(url);
+  }
+}
+
+function playmodePlayerName(player, fallbackSeat = 1) {
+  return player?.username ? displayUsername(player.username) : `Player ${fallbackSeat}`;
+}
+
+function activePlaymodePlayer() {
+  if (!state.playmodeMatch) {
+    return null;
+  }
+  return state.playmodeMatch.active_seat === 2 ? state.playmodeMatch.player_two : state.playmodeMatch.player_one;
+}
+
+function playmodeTurnStatusText() {
+  const match = state.playmodeMatch;
+  if (!match) {
+    return "Open a match code or create a new one to see both boards.";
+  }
+  const isWaitingForOpponent = !match.player_two?.profile_id || match.status === "waiting";
+  if (isWaitingForOpponent) {
+    return `Room code: ${match.public_id} • Waiting for opponent`;
+  }
+  const activePlayer = activePlaymodePlayer();
+  const activeName = playmodePlayerName(activePlayer, match.active_seat || 1);
+  const phase = playmodePhaseLabel(currentPlaymodePhase());
+  if (match.admin_override) {
+    return `Room code: ${match.public_id} • ${activeName}'s turn • ${phase}`;
+  }
+  if (
+    match.pending_choice
+    && match.pending_choice.kind !== "hidden"
+    && match.viewer_seat === match.pending_choice.controller_seat
+  ) {
+    return `Your response needed • ${match.pending_choice.message || "Choose an option"}`;
+  }
+  if (match.viewer_seat === match.active_seat) {
+    return `Your turn • ${phase}`;
+  }
+  return `Waiting for ${activeName}`;
+}
+
+function syncPlaymodeMatchFocus() {
+  document.body.classList.toggle("playmode-match-focus", isPlaymodePage && hasPlaymodeMatchRoute() && Boolean(state.playmodeMatch));
+}
+
+function schedulePlaymodePolling() {
+  if (!isPlaymodePage) {
+    return;
+  }
+  if (state.playmodePollTimer) {
+    window.clearInterval(state.playmodePollTimer);
+    state.playmodePollTimer = null;
+  }
+  const shouldPoll = Boolean(
+    state.playmodeMatch
+    && state.playmodeMatch.status === "active"
+    && !canControlActivePlaymodeSeat()
+    && window.location.protocol !== "file:"
+  );
+  if (!shouldPoll) {
+    return;
+  }
+  state.playmodePollTimer = window.setInterval(async () => {
+    const matchId = state.playmodeMatch?.public_id;
+    if (!matchId || canControlActivePlaymodeSeat()) {
+      schedulePlaymodePolling();
+      return;
+    }
+    try {
+      const suffix = state.activeProfileId ? `?profile_id=${state.activeProfileId}` : "";
+      state.playmodeMatch = await fetchJson(`${API_BASE}/playmode/matches/${encodeURIComponent(matchId)}${suffix}`);
+      renderPlaymodePage();
+    } catch (error) {
+      console.warn("Playmode polling failed", error);
+    }
+  }, 8000);
+}
+
 function renderPlaymodeZoneCards(cards, zoneName, { hidden = false, count = 0 } = {}) {
   if (hidden) {
     const ghosts = Array.from({ length: Math.min(5, count || 0) }, () => `
@@ -1983,6 +2079,42 @@ function renderPlaymodeZoneCards(cards, zoneName, { hidden = false, count = 0 } 
   }).join("");
 }
 
+function playmodeGraveyardKey(seat) {
+  return `${state.playmodeMatch?.public_id || "match"}:${seat}`;
+}
+
+function isPlaymodeGraveyardOpen(seat) {
+  return Boolean(state.playmodeGraveyardOpen[playmodeGraveyardKey(seat)]);
+}
+
+function togglePlaymodeGraveyard(seat) {
+  const key = playmodeGraveyardKey(seat);
+  state.playmodeGraveyardOpen[key] = !state.playmodeGraveyardOpen[key];
+  renderPlaymodePage();
+}
+
+function renderPlaymodePrivateCounts(player, zones) {
+  const graveyardOpen = isPlaymodeGraveyardOpen(player.seat);
+  const graveyard = zones.graveyard || [];
+  return `
+    <div class="playmode-private-counts">
+      <article class="playmode-zone-card playmode-count-card">
+        <div class="playmode-zone-head"><span>Opponent Hand</span><strong>${zones.hand_count ?? 0}</strong></div>
+        <p class="playmode-zone-statline">${zones.hand_count ?? 0} hidden card${(zones.hand_count ?? 0) === 1 ? "" : "s"} in hand.</p>
+      </article>
+      <article class="playmode-zone-card playmode-count-card">
+        <div class="playmode-zone-head"><span>Opponent Graveyard</span><strong>${zones.graveyard_count ?? 0}</strong></div>
+        <button class="ghost-button playmode-graveyard-toggle" type="button" data-playmode-graveyard-seat="${escapeHtml(String(player.seat))}">
+          ${graveyardOpen ? "Hide graveyard" : `Show ${zones.graveyard_count ?? 0} cards`}
+        </button>
+        <div class="playmode-mini-row${graveyardOpen ? "" : " is-collapsed"}">
+          ${graveyardOpen ? renderPlaymodeZoneCards(graveyard, "graveyard") : ""}
+        </div>
+      </article>
+    </div>
+  `;
+}
+
 function playmodePendingCandidate(zoneName, uid) {
   const choice = state.playmodeMatch?.pending_choice;
   if (!choice || choice.kind === "hidden") {
@@ -1996,42 +2128,79 @@ function renderPlaymodeSeat(container, player, viewerSeat, adminOverride = false
     return;
   }
   const isViewer = adminOverride || viewerSeat === player.seat;
+  const isOpponentPrivacy = !isViewer;
+  const isActive = state.playmodeMatch?.status === "active" && state.playmodeMatch?.active_seat === player.seat;
   const zones = player.zones || {};
-  container.innerHTML = `
-    <div class="playmode-seat-header">
-      <div>
-        <strong>${escapeHtml(player.username ? displayUsername(player.username) : `Player ${player.seat}`)}</strong>
-        <span>${escapeHtml(player.deck_title || "No deck selected")}</span>
+  const shell = container.closest(".playmode-seat-panel");
+  if (shell) {
+    shell.classList.toggle("is-self-seat", isViewer);
+    shell.classList.toggle("is-opponent-seat", !isViewer);
+    shell.classList.toggle("is-active-seat", isActive);
+  }
+  const privateCounts = isOpponentPrivacy ? renderPlaymodePrivateCounts(player, zones) : "";
+  const sideInfoMarkup = isOpponentPrivacy
+    ? privateCounts
+    : `
+      <div class="playmode-private-counts">
+        <article class="playmode-zone-card playmode-count-card">
+          <div class="playmode-zone-head"><span>Library</span><strong>${zones.deck_count ?? 0}</strong></div>
+          <p class="playmode-zone-statline">Deck order hidden.</p>
+        </article>
+        <article class="playmode-zone-card playmode-count-card">
+          <div class="playmode-zone-head"><span>Graveyard</span><strong>${zones.graveyard_count ?? 0}</strong></div>
+          <button class="ghost-button playmode-graveyard-toggle" type="button" data-playmode-graveyard-seat="${escapeHtml(String(player.seat))}">
+            ${isPlaymodeGraveyardOpen(player.seat) ? "Hide graveyard" : `Show ${zones.graveyard_count ?? 0} cards`}
+          </button>
+          <div class="playmode-mini-row${isPlaymodeGraveyardOpen(player.seat) ? "" : " is-collapsed"}">
+            ${isPlaymodeGraveyardOpen(player.seat) ? renderPlaymodeZoneCards(zones.graveyard || [], "graveyard") : ""}
+          </div>
+        </article>
       </div>
-      <span class="chip">${player.ready ? "Ready" : "Waiting"}</span>
+    `;
+  container.innerHTML = `
+    <div class="playmode-seat-frame${isViewer ? " is-self" : " is-opponent"}">
+      <aside class="playmode-player-card">
+        <div class="playmode-avatar-orb">${escapeHtml(playmodePlayerName(player, player.seat).slice(0, 1).toUpperCase())}</div>
+        <strong>${escapeHtml(playmodePlayerName(player, player.seat))}</strong>
+        <span>${escapeHtml(player.deck_title || "No deck selected")}</span>
+        <div class="playmode-player-stats">
+          <span title="Shields">${zones.shield_count ?? 0}</span>
+          <span title="Hand">${zones.hand_count ?? 0}</span>
+          <span title="Deck">${zones.deck_count ?? 0}</span>
+          <span title="Graveyard">${zones.graveyard_count ?? 0}</span>
+        </div>
+        <span class="chip${isActive ? " is-active-turn" : ""}">${isActive ? "Active Turn" : (player.ready ? "Ready" : "Waiting")}</span>
+      </aside>
+      <div class="playmode-table-zones">
+        <section class="playmode-zone-card playmode-zone-shields">
+          <div class="playmode-zone-head"><span>Shields</span><strong>${zones.shield_count ?? 0}</strong></div>
+          <div class="playmode-mini-row">${renderPlaymodeZoneCards(zones.shields || [], "shields")}</div>
+        </section>
+        <section class="playmode-zone-card playmode-zone-battle">
+          <div class="playmode-zone-head"><span>Battle Zone</span><strong>${(zones.battle || []).length}</strong></div>
+          <div class="playmode-mini-row">${renderPlaymodeZoneCards(zones.battle || [], "battle")}</div>
+        </section>
+        <section class="playmode-zone-card playmode-zone-mana">
+          <div class="playmode-zone-head"><span>Mana Zone</span><strong>${(zones.mana || []).length}</strong></div>
+          <div class="playmode-mini-row">${renderPlaymodeZoneCards(zones.mana || [], "mana")}</div>
+        </section>
+      </div>
+      <aside class="playmode-zone-sidebar">
+        ${sideInfoMarkup}
+      </aside>
     </div>
-    <div class="playmode-seat-grid">
-      <section class="playmode-zone-card">
-        <div class="playmode-zone-head"><span>Shields</span><strong>${zones.shield_count ?? 0}</strong></div>
-        <div class="playmode-mini-row">${renderPlaymodeZoneCards(zones.shields || [], "shields")}</div>
-      </section>
-      <section class="playmode-zone-card">
-        <div class="playmode-zone-head"><span>Battle Zone</span><strong>${(zones.battle || []).length}</strong></div>
-        <div class="playmode-mini-row">${renderPlaymodeZoneCards(zones.battle || [], "battle")}</div>
-      </section>
-      <section class="playmode-zone-card">
-        <div class="playmode-zone-head"><span>Mana Zone</span><strong>${(zones.mana || []).length}</strong></div>
-        <div class="playmode-mini-row">${renderPlaymodeZoneCards(zones.mana || [], "mana")}</div>
-      </section>
-      <section class="playmode-zone-card">
+    ${isViewer ? `
+      <section class="playmode-hand-strip">
         <div class="playmode-zone-head"><span>Hand</span><strong>${zones.hand_count ?? 0}</strong></div>
-        <div class="playmode-mini-row">${renderPlaymodeZoneCards(zones.hand || [], "hand", { hidden: !isViewer, count: zones.hand_count ?? 0 })}</div>
+        <div class="playmode-mini-row">${renderPlaymodeZoneCards(zones.hand || [], "hand")}</div>
       </section>
-      <section class="playmode-zone-card">
-        <div class="playmode-zone-head"><span>Deck</span><strong>${zones.deck_count ?? 0}</strong></div>
-        <div class="playmode-zone-statline">Library is hidden. Deck order cannot be inspected.</div>
-      </section>
-      <section class="playmode-zone-card">
-        <div class="playmode-zone-head"><span>Graveyard</span><strong>${zones.graveyard_count ?? 0}</strong></div>
-        <div class="playmode-mini-row">${renderPlaymodeZoneCards(zones.graveyard || [], "graveyard")}</div>
-      </section>
-    </div>
+    ` : ""}
   `;
+  for (const toggle of container.querySelectorAll("[data-playmode-graveyard-seat]")) {
+    toggle.addEventListener("click", () => {
+      togglePlaymodeGraveyard(Number(toggle.dataset.playmodeGraveyardSeat || player.seat));
+    });
+  }
   for (const card of container.querySelectorAll("[data-playmode-card-uid]")) {
     card.addEventListener("click", () => {
       void handlePlaymodeCardClick(player.seat, card.dataset.playmodeZone, card.dataset.playmodeCardUid);
@@ -2314,18 +2483,19 @@ function renderPlaymodePhasePanel() {
   }
   const phase = currentPlaymodePhase();
   const activeSeat = match.active_seat || 1;
+  const activeName = playmodePlayerName(activePlaymodePlayer(), activeSeat);
   if (elements.playmodePhaseTitle) {
     elements.playmodePhaseTitle.textContent = `${playmodePhaseLabel(phase)} Phase`;
   }
   if (elements.playmodePhaseCopy) {
     elements.playmodePhaseCopy.textContent = ({
-      untap: `Player ${activeSeat} turn • Untap all tapped mana and creatures.`,
-      draw: `Player ${activeSeat} turn • Draw one card. Deck-out is checked here.`,
-      charge: `Player ${activeSeat} turn • Click a card in hand to charge it, or skip to play phase.`,
-      play: `Player ${activeSeat} turn • Click a card in hand to play it.`,
-      attack: `Player ${activeSeat} turn • Click a creature in battle zone to tap it as an attacker.`,
-      end: `Player ${activeSeat} turn • Pass to the opponent.`
-    })[phase] || `Player ${activeSeat} turn`;
+      untap: `${activeName}'s turn • Untap all tapped mana and creatures.`,
+      draw: `${activeName}'s turn • Draw one card. Deck-out is checked here.`,
+      charge: `${activeName}'s turn • Click a card in hand to charge it, or skip to play phase.`,
+      play: `${activeName}'s turn • Click a card in hand to play it.`,
+      attack: `${activeName}'s turn • Click a creature in battle zone to tap it as an attacker.`,
+      end: `${activeName}'s turn • Pass to the opponent.`
+    })[phase] || `${activeName}'s turn`;
   }
   if (elements.playmodePhaseTrack) {
     elements.playmodePhaseTrack.replaceChildren();
@@ -2339,6 +2509,7 @@ function renderPlaymodePhasePanel() {
   const canControl = canControlActivePlaymodeSeat() && match.status === "active";
   if (elements.playmodePhaseAdvanceButton) {
     elements.playmodePhaseAdvanceButton.disabled = !canControl;
+    elements.playmodePhaseAdvanceButton.title = canControl ? "" : playmodeTurnStatusText();
     elements.playmodePhaseAdvanceButton.textContent = ({
       untap: "Resolve Untap",
       draw: "Resolve Draw",
@@ -2519,6 +2690,8 @@ function renderPlaymodePage() {
   if (!isPlaymodePage) {
     return;
   }
+  syncPlaymodeMatchFocus();
+  const matchCodeUnlocked = hasPlaymodeMatchRoute();
   const loggedIn = Boolean(state.activeProfileId);
   if (elements.playmodeDenied) {
     elements.playmodeDenied.hidden = loggedIn;
@@ -2567,17 +2740,14 @@ function renderPlaymodePage() {
       elements.playmodeList.append(empty);
     } else {
       for (const match of state.playmodeMatches) {
-        const button = document.createElement("button");
-        button.type = "button";
-        button.className = "builder-surface playmode-match-row";
-        button.innerHTML = `
+        const row = document.createElement("article");
+        row.className = "builder-surface playmode-match-row";
+        row.innerHTML = `
           <strong>${escapeHtml(match.player_one_deck_title || "Deck")} vs ${escapeHtml(match.player_two_deck_title || "Waiting for opponent")}</strong>
           <span>${escapeHtml(match.mode)} • ${escapeHtml(match.status)} • Turn ${match.current_turn}</span>
+          <span class="playmode-match-code">Match code: <strong>${escapeHtml(match.public_id)}</strong></span>
         `;
-        button.addEventListener("click", () => {
-          window.location.assign(`${playmodePagePath()}?match=${encodeURIComponent(match.public_id)}`);
-        });
-        elements.playmodeList.append(button);
+        elements.playmodeList.append(row);
       }
     }
   }
@@ -2588,14 +2758,11 @@ function renderPlaymodePage() {
   }
   if (elements.playmodeBoardMeta) {
     elements.playmodeBoardMeta.textContent = state.playmodeMatch
-      ? `${state.playmodeMatch.mode} • ${state.playmodeMatch.status} • Turn ${state.playmodeMatch.current_turn} • ${playmodePhaseLabel(currentPlaymodePhase())}${state.playmodeMatch.deadline_label ? ` • Deadline ${state.playmodeMatch.deadline_label}` : ""}`
+      ? `${state.playmodeMatch.mode} • ${state.playmodeMatch.status} • Turn ${state.playmodeMatch.current_turn} • ${playmodePhaseLabel(currentPlaymodePhase())} • ${playmodeTurnStatusText()}${state.playmodeMatch.deadline_label ? ` • Deadline ${state.playmodeMatch.deadline_label}` : ""}`
       : "Open a match code or create a new one to see both boards.";
   }
   if (elements.playmodeStatus && state.playmodeMatch) {
-    const isWaiting = !state.playmodeMatch.player_two?.profile_id || state.playmodeMatch.status === "waiting";
-    elements.playmodeStatus.textContent = isWaiting
-      ? `Room code: ${state.playmodeMatch.public_id} • Waiting for opponent`
-      : `Room code: ${state.playmodeMatch.public_id} • ${state.playmodeMatch.mode} match is active`;
+    elements.playmodeStatus.textContent = playmodeTurnStatusText();
   }
   if (elements.playmodeJoinPanel) {
     const canAdminSeatSelf = Boolean(
@@ -2616,14 +2783,22 @@ function renderPlaymodePage() {
     }
   }
   if (elements.playmodeBoard) {
-    elements.playmodeBoard.hidden = !state.playmodeMatch;
+    elements.playmodeBoard.hidden = !state.playmodeMatch || !matchCodeUnlocked;
   }
-  if (state.playmodeMatch) {
-    renderPlaymodeSeat(elements.playmodePlayerOne, state.playmodeMatch.player_one, state.playmodeMatch.viewer_seat, state.playmodeMatch.admin_override);
-    renderPlaymodeSeat(elements.playmodePlayerTwo, state.playmodeMatch.player_two, state.playmodeMatch.viewer_seat, state.playmodeMatch.admin_override);
+  if (state.playmodeMatch && matchCodeUnlocked) {
+    const viewerSeat = state.playmodeMatch.viewer_seat || 1;
+    const topPlayer = viewerSeat === 2 ? state.playmodeMatch.player_one : state.playmodeMatch.player_two;
+    const bottomPlayer = viewerSeat === 2 ? state.playmodeMatch.player_two : state.playmodeMatch.player_one;
+    renderPlaymodeSeat(elements.playmodePlayerOne, topPlayer, state.playmodeMatch.viewer_seat, state.playmodeMatch.admin_override);
+    renderPlaymodeSeat(elements.playmodePlayerTwo, bottomPlayer, state.playmodeMatch.viewer_seat, state.playmodeMatch.admin_override);
   }
-  renderPlaymodePhasePanel();
+  if (matchCodeUnlocked) {
+    renderPlaymodePhasePanel();
+  } else if (elements.playmodePhasePanel) {
+    elements.playmodePhasePanel.hidden = true;
+  }
   syncPlaymodeSoundEffects();
+  schedulePlaymodePolling();
 }
 
 async function createPlaymodeMatch() {
@@ -2634,6 +2809,7 @@ async function createPlaymodeMatch() {
   }
   const deckPublicId = elements.playmodeDeckSelect?.value;
   const mode = elements.playmodeModeSelect?.value || "live";
+  const inviteUsername = elements.playmodeInviteUsername?.value.trim() || "";
   if (!deckPublicId) {
     setStatus("Choose one of your own decks first.", "error");
     if (elements.playmodeStatus) elements.playmodeStatus.textContent = "Choose one of your own decks first.";
@@ -2643,13 +2819,18 @@ async function createPlaymodeMatch() {
     state.playmodeMatch = await fetchJson(`${API_BASE}/playmode/matches`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ profile_id: state.activeProfileId, deck_public_id: deckPublicId, mode })
+      body: JSON.stringify({ profile_id: state.activeProfileId, deck_public_id: deckPublicId, mode, invite_username: inviteUsername || null })
     });
     await loadPlaymodeMatches();
     renderPlaymodePage();
-    const message = `Playmode match created. Share code: ${state.playmodeMatch.public_id}`;
+    const message = inviteUsername
+      ? `Private Playmode match created and ${inviteUsername} was invited. Code: ${state.playmodeMatch.public_id}`
+      : `Playmode match created. Share code: ${state.playmodeMatch.public_id}`;
     setStatus(message, "success");
-    if (elements.playmodeStatus) elements.playmodeStatus.textContent = `Room code: ${state.playmodeMatch.public_id} • Waiting for opponent`;
+    if (elements.playmodeInviteUsername) elements.playmodeInviteUsername.value = "";
+    if (elements.playmodeStatus) elements.playmodeStatus.textContent = inviteUsername
+      ? `Private room code: ${state.playmodeMatch.public_id} • Waiting for ${inviteUsername}`
+      : `Room code: ${state.playmodeMatch.public_id} • Waiting for opponent`;
   } catch (error) {
     const message = error?.message || "Playmode match could not be created.";
     setStatus(message, "error");
@@ -2672,8 +2853,12 @@ async function openPlaymodeMatchFromInput() {
   const suffix = state.activeProfileId ? `?profile_id=${state.activeProfileId}` : "";
   try {
     state.playmodeMatch = await fetchJson(`${API_BASE}/playmode/matches/${encodeURIComponent(matchId)}${suffix}`);
+    if (!hasPlaymodeMatchRoute()) {
+      navigateToPlaymodeMatch(state.playmodeMatch.public_id);
+      return;
+    }
     const next = new URL(window.location.href);
-    next.searchParams.set("match", matchId);
+    next.searchParams.set("match", state.playmodeMatch.public_id);
     window.history.replaceState({}, "", next);
     renderPlaymodePage();
     if (elements.playmodeStatus) {
@@ -2705,8 +2890,7 @@ async function joinCurrentPlaymodeMatch() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ profile_id: state.activeProfileId, deck_public_id: deckPublicId })
     });
-    await loadPlaymodeMatches();
-    renderPlaymodePage();
+    navigateToPlaymodeMatch(state.playmodeMatch.public_id, { replace: true });
     setStatus("Joined the match successfully.", "success");
     if (elements.playmodeStatus) {
       elements.playmodeStatus.textContent = `Room code: ${state.playmodeMatch.public_id} • Match is ready`;

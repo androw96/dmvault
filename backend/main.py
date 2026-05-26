@@ -800,6 +800,17 @@ def playmode_dump_state(state_payload: dict) -> str:
     return json.dumps(playmode_minimize_state_cards(state_payload), separators=(",", ":"))
 
 
+def playmode_invite_allows(payload: dict, profile_id: int | None, *, match: PlayMatch, admin_override: bool = False) -> bool:
+    if admin_override:
+        return True
+    if not profile_id:
+        return not payload.get("private_invite")
+    if profile_id in {match.player_one_profile_id, match.player_two_profile_id}:
+        return True
+    invited_profile_id = payload.get("invited_profile_id")
+    return bool(payload.get("private_invite") and invited_profile_id == profile_id)
+
+
 def build_playmode_stack_for_deck(deck: Deck) -> list[dict]:
     cards: list[dict] = []
     items = sorted(deck.items, key=lambda item: (item.card.cost, item.card.name, item.card.id))
@@ -838,10 +849,11 @@ def build_playmode_player_state(deck: Deck) -> dict:
     }
 
 
-def build_playmode_match_state(deck_one: Deck, deck_two: Deck | None = None) -> dict:
+def build_playmode_match_state(deck_one: Deck, deck_two: Deck | None = None, *, starting_seat: int = 1) -> dict:
+    active_seat = starting_seat if starting_seat in {1, 2} else 1
     return {
         "current_turn": 1,
-        "active_seat": 1,
+        "active_seat": active_seat,
         "current_phase": "untap",
         "winner_seat": None,
         "player_one": build_playmode_player_state(deck_one),
@@ -2467,6 +2479,21 @@ def create_playmode_match(payload: PlaymodeMatchCreateIn, db: Session = Depends(
     if payload.mode not in {"live", "async"}:
         raise HTTPException(status_code=400, detail="Mode must be either live or async.")
     deck = ensure_owned_deck(db, payload.deck_public_id, payload.profile_id)
+    invited_profile = None
+    invite_username = slugify(payload.invite_username or "")
+    if invite_username:
+        invited_profile = db.scalar(select(Profile).where(Profile.username == invite_username))
+        if not invited_profile:
+            raise HTTPException(status_code=404, detail="Invited user was not found.")
+        if invited_profile.id == payload.profile_id:
+            raise HTTPException(status_code=400, detail="You cannot invite yourself to your own match.")
+        if invited_profile.banned_at:
+            raise HTTPException(status_code=400, detail="This user cannot be invited right now.")
+    state_payload = build_playmode_match_state(deck)
+    if invited_profile:
+        state_payload["private_invite"] = True
+        state_payload["invited_profile_id"] = invited_profile.id
+        state_payload["invited_username"] = invited_profile.username
     match = PlayMatch(
         public_id=generate_public_id(),
         mode=payload.mode,
@@ -2476,11 +2503,19 @@ def create_playmode_match(payload: PlaymodeMatchCreateIn, db: Session = Depends(
         active_seat=1,
         current_turn=1,
         turn_deadline_at=None,
-        state_json=playmode_dump_state(build_playmode_match_state(deck)),
+        state_json=playmode_dump_state(state_payload),
         created_at=datetime.utcnow(),
         updated_at=datetime.utcnow(),
     )
     db.add(match)
+    if invited_profile:
+        db.add(Notification(
+            profile_id=invited_profile.id,
+            actor_profile_id=profile.id,
+            type="playmode_invite",
+            message=f"{profile.username} invited you to a private Playmode match. Match code: {match.public_id}",
+            created_at=datetime.utcnow(),
+        ))
     db.commit()
     loaded = db.scalar(
         select(PlayMatch)
@@ -2517,12 +2552,23 @@ def join_playmode_match(public_id: str, payload: PlaymodeMatchJoinIn, db: Sessio
         raise HTTPException(status_code=400, detail="You are already seated in this match.")
     if match.player_two_profile_id and match.player_two_profile_id != payload.profile_id:
         raise HTTPException(status_code=400, detail="This match already has two players.")
+    state_meta = json.loads(match.state_json or "{}")
+    if state_meta.get("private_invite") and not bool(profile.is_admin) and state_meta.get("invited_profile_id") != payload.profile_id:
+        raise HTTPException(status_code=403, detail="This is a private invited match.")
     deck = ensure_owned_deck(db, payload.deck_public_id, payload.profile_id)
     if not match.player_two_profile_id:
+        starting_seat = secrets.SystemRandom().choice([1, 2])
         match.player_two_profile_id = payload.profile_id
         match.player_two_deck_id = deck.id
         match.status = "active"
-        match.state_json = playmode_dump_state(build_playmode_match_state(match.player_one_deck, deck))
+        match.active_seat = starting_seat
+        match.current_turn = 1
+        next_state = build_playmode_match_state(match.player_one_deck, deck, starting_seat=starting_seat)
+        if state_meta.get("private_invite"):
+            next_state["private_invite"] = True
+            next_state["invited_profile_id"] = state_meta.get("invited_profile_id")
+            next_state["invited_username"] = state_meta.get("invited_username")
+        match.state_json = playmode_dump_state(next_state)
         match.turn_deadline_at = datetime.utcnow() + timedelta(hours=24) if match.mode == "async" else None
         match.updated_at = datetime.utcnow()
         db.commit()
@@ -2554,9 +2600,13 @@ def get_playmode_match(public_id: str, profile_id: int | None = None, db: Sessio
     )
     if not match:
         raise HTTPException(status_code=404, detail="Match not found.")
+    state_meta = json.loads(match.state_json or "{}")
     if viewer_profile and viewer_profile.is_admin:
         return playmode_match_view(match, profile_id, db, admin_override=True)
-    if profile_id and profile_id not in {match.player_one_profile_id, match.player_two_profile_id}:
+    if not playmode_invite_allows(state_meta, profile_id, match=match):
+        raise HTTPException(status_code=403, detail="This private match can only be viewed by invited players.")
+    invited_profile_id = state_meta.get("invited_profile_id")
+    if profile_id and profile_id not in {match.player_one_profile_id, match.player_two_profile_id, invited_profile_id}:
         raise HTTPException(status_code=403, detail="You do not have access to this match.")
     return playmode_match_view(match, profile_id, db)
 
