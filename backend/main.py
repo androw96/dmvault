@@ -20,7 +20,7 @@ from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
-from sqlalchemy import Select, func, select
+from sqlalchemy import Select, func, or_, select
 from sqlalchemy.orm import Session, joinedload, selectinload
 
 from .database import BASE_DIR, SessionLocal
@@ -100,6 +100,7 @@ RATE_LIMIT_BUCKETS: dict[str, list[float]] = {}
 RATE_LIMIT_MAX_BUCKETS = int(os.getenv("RATE_LIMIT_MAX_BUCKETS", "5000"))
 RATE_LIMIT_PRUNE_INTERVAL_SECONDS = int(os.getenv("RATE_LIMIT_PRUNE_INTERVAL_SECONDS", "60"))
 RATE_LIMIT_LAST_PRUNE = 0.0
+ASSET_VERSION = "20260526mana"
 PDF_GENERATION_SEMAPHORE = threading.Semaphore(int(os.getenv("PDF_MAX_CONCURRENCY", "1")))
 LAST_EMAIL_ERROR: str | None = None
 RATE_LIMIT_RULES = {
@@ -809,6 +810,23 @@ def playmode_invite_allows(payload: dict, profile_id: int | None, *, match: Play
         return True
     invited_profile_id = payload.get("invited_profile_id")
     return bool(payload.get("private_invite") and invited_profile_id == profile_id)
+
+
+def find_invited_profile(db: Session, value: str) -> Profile | None:
+    raw = value.strip().lstrip("@")
+    if not raw:
+        return None
+    normalized_email = normalize_email(raw)
+    slug = slugify(raw)
+    raw_lower = raw.lower()
+    criteria = [
+        Profile.username == slug,
+        func.lower(Profile.username) == raw_lower,
+        func.lower(Profile.display_name) == raw_lower,
+    ]
+    if "@" in raw:
+        criteria.append(func.lower(Profile.email) == normalized_email)
+    return db.scalars(select(Profile).where(or_(*criteria)).limit(1)).first()
 
 
 def build_playmode_stack_for_deck(deck: Deck) -> list[dict]:
@@ -1687,6 +1705,16 @@ def playmode_apply_action(state_payload: dict, payload: PlaymodeActionIn) -> tup
     action = payload.action
     active_seat = int(state_payload.get("active_seat") or 1)
     phase = str(state_payload.get("current_phase") or "untap")
+    if action == "concede":
+        conceding_seat = payload.seat or active_seat
+        if conceding_seat not in {1, 2}:
+            raise HTTPException(status_code=400, detail="Choose the conceding player.")
+        winner = playmode_opponent_seat(conceding_seat)
+        state_payload["winner_seat"] = winner
+        state_payload["conceded_seat"] = conceding_seat
+        state_payload.pop("pending_choice", None)
+        state_payload.pop("pending_attack", None)
+        return f"Player {conceding_seat} conceded. Player {winner} wins.", winner
     if action in {"choose_pending", "pass_pending"}:
         return playmode_resolve_pending_choice(state_payload, payload)
     if state_payload.get("pending_choice") and action != "advance_phase":
@@ -2022,17 +2050,22 @@ def parse_history_entry(change_note: str | None) -> tuple[str, str] | None:
 
 def render_page(filename: str) -> HTMLResponse:
     html = (FRONTEND_DIR / filename).read_text()
+    styles_url = f"/assets/styles.css?v={ASSET_VERSION}"
+    app_url = f"/assets/app.js?v={ASSET_VERSION}"
+    logo_url = f"/assets/assets/crystal-vault-logo.png?v={ASSET_VERSION}"
     html = (
         html
-        .replace('./styles.css', '/assets/styles.css?v=20260505w')
-        .replace('./app.js', '/assets/app.js?v=20260505w')
-        .replace('./assets/crystal-vault-logo.png', '/assets/assets/crystal-vault-logo.png?v=20260505w')
+        .replace('./styles.css?v=20260525d', styles_url)
+        .replace('./styles.css', styles_url)
+        .replace('./app.js?v=20260525d', app_url)
+        .replace('./app.js', app_url)
+        .replace('./assets/crystal-vault-logo.png', logo_url)
         .replace('./assets/', '/assets/assets/')
     )
     if 'rel="icon"' not in html:
         html = html.replace(
             "</head>",
-            '  <link rel="icon" type="image/png" href="/assets/assets/crystal-vault-logo.png?v=20260505w">\n</head>',
+            f'  <link rel="icon" type="image/png" href="{logo_url}">\n</head>',
         )
     return HTMLResponse(html)
 
@@ -2482,9 +2515,9 @@ def create_playmode_match(payload: PlaymodeMatchCreateIn, db: Session = Depends(
     invited_profile = None
     invite_username = slugify(payload.invite_username or "")
     if invite_username:
-        invited_profile = db.scalar(select(Profile).where(Profile.username == invite_username))
+        invited_profile = find_invited_profile(db, payload.invite_username or "")
         if not invited_profile:
-            raise HTTPException(status_code=404, detail="Invited user was not found.")
+            raise HTTPException(status_code=404, detail="Invited user was not found. Use their exact username, profile display name, or verified email.")
         if invited_profile.id == payload.profile_id:
             raise HTTPException(status_code=400, detail="You cannot invite yourself to your own match.")
         if invited_profile.banned_at:
@@ -2634,12 +2667,19 @@ def apply_playmode_action(public_id: str, payload: PlaymodeActionIn, db: Session
     mover_seat = 1 if payload.profile_id == match.player_one_profile_id else (2 if payload.profile_id == match.player_two_profile_id else None)
     if not mover_seat and not is_admin_override:
         raise HTTPException(status_code=403, detail="You are not seated in this match.")
+    if payload.action == "concede":
+        conceding_seat = payload.seat or mover_seat
+        if conceding_seat not in {1, 2}:
+            raise HTTPException(status_code=400, detail="Choose the player who is conceding.")
+        if not is_admin_override and conceding_seat != mover_seat:
+            raise HTTPException(status_code=403, detail="You can only concede your own seat.")
+        payload.seat = conceding_seat
     previous_active_seat = match.active_seat
     state_payload = json.loads(match.state_json or "{}")
     playmode_hydrate_state_cards(state_payload, db)
     pending_controller = (state_payload.get("pending_choice") or {}).get("controller_seat")
     can_resolve_pending = payload.action in {"choose_pending", "pass_pending"} and pending_controller == mover_seat
-    if not is_admin_override and match.active_seat != mover_seat and not can_resolve_pending:
+    if not is_admin_override and match.active_seat != mover_seat and not can_resolve_pending and payload.action != "concede":
         raise HTTPException(status_code=403, detail="It is not your turn.")
     move_summary, winner_seat = playmode_apply_action(state_payload, payload)
     state_payload["last_move_summary"] = move_summary

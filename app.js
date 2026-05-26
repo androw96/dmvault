@@ -143,6 +143,7 @@ const state = {
   playmodeMatch: null,
   playmodePollTimer: null,
   playmodeGraveyardOpen: {},
+  playmodeInviteSelectedUsername: "",
   playmodeLastSoundSignature: null
 };
 
@@ -385,6 +386,14 @@ const elements = {
   playmodeDeckSelect: document.querySelector("#playmode-deck-select"),
   playmodeModeSelect: document.querySelector("#playmode-mode-select"),
   playmodeInviteUsername: document.querySelector("#playmode-invite-username"),
+  playmodeOpenInviteModalButton: document.querySelector("#playmode-open-invite-modal"),
+  playmodeInviteModal: null,
+  playmodeInviteList: null,
+  playmodeInviteStatus: null,
+  playmodeInviteManualInput: null,
+  playmodeInviteManualButton: null,
+  closePlaymodeInviteModal: null,
+  closePlaymodeInviteModalTargets: [],
   playmodeCreateButton: document.querySelector("#playmode-create-button"),
   playmodeOpenCode: document.querySelector("#playmode-open-code"),
   playmodeOpenButton: document.querySelector("#playmode-open-button"),
@@ -402,6 +411,7 @@ const elements = {
   playmodePhaseCopy: document.querySelector("#playmode-phase-copy"),
   playmodePhaseTrack: document.querySelector("#playmode-phase-track"),
   playmodePhaseAdvanceButton: document.querySelector("#playmode-phase-advance-button"),
+  playmodeConcedeButton: document.querySelector("#playmode-concede-button"),
   playmodePlayerOne: document.querySelector("#playmode-player-one"),
   playmodePlayerTwo: document.querySelector("#playmode-player-two"),
   statusNodes: [...document.querySelectorAll("[data-status]")]
@@ -458,6 +468,7 @@ async function initialize() {
   ensureExportModal();
   ensureAdminMonthModal();
   ensureAuthModalEnhancements();
+  ensurePlaymodeInviteModal();
   ensurePlaytestActionOverlay();
   ensurePlaytestCinematicModal();
   ensurePlaytestLibraryModal();
@@ -1553,6 +1564,7 @@ function playtestActionDefinitions(zoneName, card) {
         }
       },
       { label: "Charge", run: () => movePlaytestCard("hand", card.uid, "mana", { faceDown: false, resetTapped: true }) },
+      { label: "Shield", run: () => movePlaytestCard("hand", card.uid, "shields", { faceDown: true, resetTapped: true }) },
       { label: "Discard", run: () => movePlaytestCard("hand", card.uid, "graveyard", { faceDown: false, resetTapped: true }) },
     );
   }
@@ -1993,6 +2005,12 @@ function playmodeTurnStatusText() {
   const match = state.playmodeMatch;
   if (!match) {
     return "Open a match code or create a new one to see both boards.";
+  }
+  if (match.status === "finished") {
+    const winner = match.winner_profile_id === match.player_one?.profile_id
+      ? match.player_one
+      : (match.winner_profile_id === match.player_two?.profile_id ? match.player_two : null);
+    return winner ? `${playmodePlayerName(winner)} won the match.` : "This match has finished.";
   }
   const isWaitingForOpponent = !match.player_two?.profile_id || match.status === "waiting";
   if (isWaitingForOpponent) {
@@ -2451,6 +2469,28 @@ async function advancePlaymodePhase() {
   });
 }
 
+async function concedePlaymodeMatch() {
+  if (!state.playmodeMatch || !state.activeProfileId || state.playmodeMatch.status !== "active") {
+    return;
+  }
+  const seat = state.playmodeMatch.admin_override
+    ? (state.playmodeMatch.viewer_seat || state.playmodeMatch.active_seat || 1)
+    : state.playmodeMatch.viewer_seat;
+  if (!seat) {
+    setPlaymodeStatus("You must be seated in this match to concede.");
+    return;
+  }
+  const confirmed = window.confirm("Concede this match? This will immediately give the win to your opponent.");
+  if (!confirmed) {
+    return;
+  }
+  await runPlaymodeAction({
+    profile_id: state.activeProfileId,
+    action: "concede",
+    seat
+  });
+}
+
 async function endPlaymodeTurn() {
   if (!state.playmodeMatch || !canControlActivePlaymodeSeat()) {
     return;
@@ -2518,6 +2558,12 @@ function renderPlaymodePhasePanel() {
       attack: "Finish Attack",
       end: "Pass Turn"
     })[phase] || "Advance Phase";
+  }
+  if (elements.playmodeConcedeButton) {
+    const canConcede = Boolean(match.status === "active" && state.activeProfileId && (match.viewer_seat || match.admin_override));
+    elements.playmodeConcedeButton.hidden = match.status !== "active";
+    elements.playmodeConcedeButton.disabled = !canConcede;
+    elements.playmodeConcedeButton.title = canConcede ? "Concede this match" : playmodeTurnStatusText();
   }
   renderPlaymodePendingChoicePanel();
 }
@@ -2827,6 +2873,7 @@ async function createPlaymodeMatch() {
       ? `Private Playmode match created and ${inviteUsername} was invited. Code: ${state.playmodeMatch.public_id}`
       : `Playmode match created. Share code: ${state.playmodeMatch.public_id}`;
     setStatus(message, "success");
+    state.playmodeInviteSelectedUsername = "";
     if (elements.playmodeInviteUsername) elements.playmodeInviteUsername.value = "";
     if (elements.playmodeStatus) elements.playmodeStatus.textContent = inviteUsername
       ? `Private room code: ${state.playmodeMatch.public_id} • Waiting for ${inviteUsername}`
@@ -3465,6 +3512,9 @@ function bindEvents() {
   elements.openPlaymodePageButton?.addEventListener("click", () => {
     window.location.assign(playmodePagePath());
   });
+  elements.playmodeOpenInviteModalButton?.addEventListener("click", () => {
+    void openPlaymodeInviteModal();
+  });
   elements.playmodeCreateButton?.addEventListener("click", () => {
     void createPlaymodeMatch();
   });
@@ -3476,6 +3526,9 @@ function bindEvents() {
   });
   elements.playmodePhaseAdvanceButton?.addEventListener("click", () => {
     void advancePlaymodePhase();
+  });
+  elements.playmodeConcedeButton?.addEventListener("click", () => {
+    void concedePlaymodeMatch();
   });
   elements.playmodeExitButton?.addEventListener("click", () => {
     window.location.assign(builderEditorPath());
@@ -4187,6 +4240,140 @@ function ensureExportModal() {
   for (const target of elements.exportProgressCloseTargets) {
     target.addEventListener("click", closeExportModal);
   }
+}
+
+function ensurePlaymodeInviteModal() {
+  if (document.querySelector("#playmode-invite-modal")) {
+    elements.playmodeInviteModal = document.querySelector("#playmode-invite-modal");
+    elements.playmodeInviteList = document.querySelector("#playmode-invite-list");
+    elements.playmodeInviteStatus = document.querySelector("#playmode-invite-status");
+    elements.playmodeInviteManualInput = document.querySelector("#playmode-invite-manual-input");
+    elements.playmodeInviteManualButton = document.querySelector("#playmode-invite-manual-button");
+    elements.closePlaymodeInviteModal = document.querySelector("#close-playmode-invite-modal");
+    elements.closePlaymodeInviteModalTargets = [...document.querySelectorAll("[data-close-playmode-invite-modal]")];
+    return;
+  }
+  const wrapper = document.createElement("div");
+  wrapper.innerHTML = `
+    <div id="playmode-invite-modal" class="modal-shell" hidden>
+      <div class="modal-backdrop" data-close-playmode-invite-modal></div>
+      <section class="panel modal-panel auth-modal-panel playmode-invite-modal-panel">
+        <div class="panel-header">
+          <div>
+            <p class="section-label">Private match</p>
+            <h2>Invite a followed user</h2>
+            <p class="hero-text">Pick one of the players you follow. The invite is sent when you create the match.</p>
+          </div>
+          <button id="close-playmode-invite-modal" type="button" class="ghost-button">Close</button>
+        </div>
+        <p id="playmode-invite-status" class="hero-text">Loading followed users...</p>
+        <div id="playmode-invite-list" class="playmode-invite-list"></div>
+        <div class="playmode-invite-manual">
+          <label class="field">
+            <span>Manual username</span>
+            <input id="playmode-invite-manual-input" type="text" placeholder="@username">
+          </label>
+          <button id="playmode-invite-manual-button" type="button" class="primary-button">Use Manual Invite</button>
+        </div>
+      </section>
+    </div>
+  `;
+  document.body.append(wrapper.firstElementChild);
+  elements.playmodeInviteModal = document.querySelector("#playmode-invite-modal");
+  elements.playmodeInviteList = document.querySelector("#playmode-invite-list");
+  elements.playmodeInviteStatus = document.querySelector("#playmode-invite-status");
+  elements.playmodeInviteManualInput = document.querySelector("#playmode-invite-manual-input");
+  elements.playmodeInviteManualButton = document.querySelector("#playmode-invite-manual-button");
+  elements.closePlaymodeInviteModal = document.querySelector("#close-playmode-invite-modal");
+  elements.closePlaymodeInviteModalTargets = [...document.querySelectorAll("[data-close-playmode-invite-modal]")];
+  elements.closePlaymodeInviteModal?.addEventListener("click", closePlaymodeInviteModal);
+  for (const target of elements.closePlaymodeInviteModalTargets) {
+    target.addEventListener("click", closePlaymodeInviteModal);
+  }
+  elements.playmodeInviteManualButton?.addEventListener("click", () => {
+    const username = elements.playmodeInviteManualInput?.value.trim() || "";
+    selectPlaymodeInvite(username);
+  });
+}
+
+async function openPlaymodeInviteModal() {
+  ensurePlaymodeInviteModal();
+  if (!state.activeProfileId) {
+    setStatus("Log in first to invite friends.", "error");
+    if (elements.playmodeStatus) elements.playmodeStatus.textContent = "Log in first to invite friends.";
+    return;
+  }
+  if (elements.playmodeInviteModal) elements.playmodeInviteModal.hidden = false;
+  if (elements.playmodeInviteStatus) elements.playmodeInviteStatus.textContent = "Loading followed users...";
+  if (elements.playmodeInviteList) elements.playmodeInviteList.replaceChildren();
+  try {
+    await loadPlaymodeFollowingForInvite();
+    renderPlaymodeInviteList();
+  } catch (error) {
+    if (elements.playmodeInviteStatus) {
+      elements.playmodeInviteStatus.textContent = error?.message || "Could not load followed users. You can still enter a username manually.";
+    }
+  }
+}
+
+function closePlaymodeInviteModal() {
+  if (elements.playmodeInviteModal) elements.playmodeInviteModal.hidden = true;
+}
+
+async function loadPlaymodeFollowingForInvite() {
+  if (!state.activeProfileId) return;
+  if (Array.isArray(state.activeProfileDetail?.following)) return;
+  const payload = await fetchJson(withViewer(`${API_BASE}/profiles/${state.activeProfileId}`));
+  state.activeProfileDetail = {
+    ...(state.activeProfileDetail || {}),
+    ...payload
+  };
+}
+
+function renderPlaymodeInviteList() {
+  if (!elements.playmodeInviteList) return;
+  const following = state.activeProfileDetail?.following || [];
+  elements.playmodeInviteList.replaceChildren();
+  if (elements.playmodeInviteStatus) {
+    elements.playmodeInviteStatus.textContent = following.length
+      ? "Choose a friend to make this a private match."
+      : "You are not following anyone yet. Use the manual username field below.";
+  }
+  if (following.length === 0) {
+    const empty = document.createElement("p");
+    empty.className = "playmode-invite-empty";
+    empty.textContent = "Follow players from their public profile, then they will appear here.";
+    elements.playmodeInviteList.append(empty);
+    return;
+  }
+  for (const profile of following) {
+    const username = profile.username || "";
+    const row = document.createElement("article");
+    row.className = "playmode-invite-row";
+    row.innerHTML = `
+      <div class="playmode-invite-avatar" aria-hidden="true"></div>
+      <div class="playmode-invite-user">
+        <strong>${escapeHtml(displayUsername(username))}</strong>
+        <span>${profile.follower_count ?? 0} followers • ${profile.following_count ?? 0} following</span>
+      </div>
+      <button type="button" class="primary-button playmode-invite-select">Invite</button>
+    `;
+    setAvatarArt(row.querySelector(".playmode-invite-avatar"), profile.avatar_url || DEFAULT_LOGO_URL);
+    row.querySelector(".playmode-invite-select")?.addEventListener("click", () => selectPlaymodeInvite(username));
+    elements.playmodeInviteList.append(row);
+  }
+}
+
+function selectPlaymodeInvite(username) {
+  const cleanUsername = String(username || "").replace(/^@+/, "").trim();
+  if (!cleanUsername) {
+    if (elements.playmodeInviteStatus) elements.playmodeInviteStatus.textContent = "Add a username first.";
+    return;
+  }
+  state.playmodeInviteSelectedUsername = cleanUsername;
+  if (elements.playmodeInviteUsername) elements.playmodeInviteUsername.value = cleanUsername;
+  if (elements.playmodeStatus) elements.playmodeStatus.textContent = `${displayUsername(cleanUsername)} selected. Create the match to send the invite.`;
+  closePlaymodeInviteModal();
 }
 
 function setBootLoadingState(isLoading) {

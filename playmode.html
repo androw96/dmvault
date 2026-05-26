@@ -40,8 +40,11 @@
                 </select>
               </label>
               <label class="field">
-                <span>Invite player (optional)</span>
-                <input id="playmode-invite-username" type="text" placeholder="Username for a private match">
+                <span>Private invite</span>
+                <div class="playmode-invite-field">
+                  <input id="playmode-invite-username" type="text" placeholder="No friend selected" readonly>
+                  <button id="playmode-open-invite-modal" type="button" class="ghost-button">Invite Friend</button>
+                </div>
               </label>
               <button id="playmode-create-button" type="button" class="primary-button">Create Playmode Match</button>
             </div>
@@ -98,6 +101,7 @@
             <div id="playmode-phase-track" class="playmode-phase-track"></div>
             <div class="playmode-phase-actions">
               <button id="playmode-phase-advance-button" type="button" class="primary-button">Advance Phase</button>
+              <button id="playmode-concede-button" type="button" class="danger-button">Concede</button>
             </div>
           </section>
           <div class="playmode-board-grid">

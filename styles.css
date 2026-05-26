@@ -1266,6 +1266,80 @@ textarea:focus {
   width: min(560px, calc(100vw - 40px));
 }
 
+.playmode-invite-modal-panel {
+  width: min(680px, calc(100vw - 40px));
+}
+
+.playmode-invite-field {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+}
+
+.playmode-invite-field input[readonly] {
+  cursor: default;
+}
+
+.playmode-invite-list {
+  display: grid;
+  gap: 10px;
+  margin: 18px 0;
+  max-height: min(380px, 48vh);
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.playmode-invite-row {
+  display: grid;
+  grid-template-columns: 54px minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  padding: 12px;
+  border: 1px solid rgba(130, 220, 255, 0.14);
+  border-radius: 18px;
+  background:
+    linear-gradient(135deg, rgba(56, 129, 183, 0.14), rgba(5, 18, 32, 0.74)),
+    rgba(255, 255, 255, 0.03);
+}
+
+.playmode-invite-avatar {
+  width: 54px;
+  height: 54px;
+  border-radius: 50%;
+  border: 1px solid rgba(151, 230, 255, 0.35);
+  background-size: cover;
+  background-position: center;
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.24);
+}
+
+.playmode-invite-user {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.playmode-invite-user strong,
+.playmode-invite-user span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.playmode-invite-user span,
+.playmode-invite-empty {
+  color: var(--muted);
+}
+
+.playmode-invite-manual {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: end;
+  padding-top: 14px;
+  border-top: 1px solid rgba(156, 226, 255, 0.12);
+}
+
 .playtest-cinematic-shell {
   z-index: 2147483646;
   opacity: 0;
@@ -2579,7 +2653,7 @@ body[data-page="playtest"] .page-stack {
 
 .playtest-card.is-mana-card.is-tapped .playtest-card-image,
 .playtest-card.is-mana-card.is-tapped .playtest-card-back {
-  transform: rotate(90deg);
+  transform: rotate(270deg);
 }
 
 .playtest-card-image-button {
@@ -4228,6 +4302,20 @@ input[type="range"] {
     grid-template-columns: 1fr;
   }
 
+  .playmode-invite-field,
+  .playmode-invite-manual,
+  .playmode-invite-row {
+    grid-template-columns: 1fr;
+  }
+
+  .playmode-invite-row {
+    justify-items: stretch;
+  }
+
+  .playmode-invite-avatar {
+    justify-self: center;
+  }
+
   .deck-list-image-mode {
     grid-template-columns: 1fr;
   }
@@ -5178,7 +5266,7 @@ body[data-page="playtest"] .playtest-mana-orb {
 
 body[data-page="playtest"] .playtest-card[data-zone="mana"].is-tapped .playtest-card-image,
 body[data-page="playtest"] .playtest-card[data-zone="mana"].is-tapped .playtest-card-back {
-  transform: rotate(180deg) !important;
+  transform: rotate(270deg) !important;
   transform-origin: center;
 }
 
