@@ -164,6 +164,8 @@ class DeckSummaryOut(BaseModel):
     card_names: list[str] = []
     card_total: int
     updated_at_label: str
+    updated_at: str | None = None
+    created_at: str | None = None
     owner: ProfileOut | None = None
     share_url: str | None = None
     like_count: int = 0
@@ -310,6 +312,11 @@ class PlaymodeMatchJoinIn(BaseModel):
     deck_public_id: str
 
 
+class PlaymodeSpectateInviteIn(BaseModel):
+    profile_id: int
+    invite_to: str
+
+
 class PlaymodeMatchUpdateIn(BaseModel):
     profile_id: int
     current_turn: int
@@ -344,6 +351,7 @@ class PlaymodeCardViewOut(BaseModel):
     image_path: str | None = None
     face_down: bool = False
     tapped: bool = False
+    mana_produced: list[str] = []
     underlay_count: int = 0
 
 
@@ -377,6 +385,8 @@ class PlaymodeMatchSummaryOut(BaseModel):
     status: str
     current_turn: int
     active_seat: int
+    viewer_seat: int | None = None
+    needs_action: bool = False
     current_phase: str
     deadline_label: str | None = None
     player_one_username: str | None = None
@@ -396,6 +406,9 @@ class PlaymodeMatchViewOut(BaseModel):
     current_turn: int
     active_seat: int
     current_phase: str
+    last_move_summary: str | None = None
+    event_log: list[str] = []
+    pending_attack: dict | None = None
     pending_choice: dict | None = None
     viewer_seat: int | None = None
     admin_override: bool = False

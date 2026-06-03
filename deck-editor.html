@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=Cormorant+Garamond:wght@600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="./styles.css?v=20260521b">
+  <link rel="stylesheet" href="./styles.css?v=20260603cardofday">
 </head>
 <body data-page="deck-editor">
   <div class="page-shell">
@@ -174,15 +174,14 @@
             <section class="builder-surface deck-testing-panel" data-builder-editor>
               <div class="builder-surface-header">
                 <div>
-                  <p class="section-label">Deck Testing</p>
+                  <p class="section-label">Test Play mode</p>
                   <h2>Practice your lines without leaving the vault</h2>
                 </div>
               </div>
               <div class="sandbox-launch-copy">
-                <p class="hero-text">Open the sandbox to draw hands, set shields, move cards across zones, and rehearse rules interactions with the current deck.</p>
+                <p class="hero-text">Open Test Play mode to draw hands, set shields, move cards across zones, and rehearse rules interactions with the current deck.</p>
                 <div class="hero-actions">
-                  <button id="open-playtest-button" type="button" class="primary-button">Open Sandbox</button>
-                  <button id="open-admin-playtest-button" type="button" class="danger-button" hidden>Open Test Play</button>
+                  <button id="open-playtest-button" type="button" class="primary-button">Open Test Play mode</button>
                 </div>
               </div>
             </section>
@@ -194,9 +193,10 @@
                   <h2>Play against another duelist</h2>
                 </div>
               </div>
-              <div class="sandbox-launch-copy">
-                <p class="hero-text">Open Play Mode to create a live or 24-hour asynchronous Duel Masters match using one of your saved decks.</p>
-                <button id="open-playmode-page-button" type="button" class="primary-button">Open Play Mode</button>
+              <div class="sandbox-launch-copy playmode-coming-soon-card">
+                <span class="coming-soon-kicker">Coming Soon</span>
+                <p class="hero-text">Live and 24-hour Duel Masters matches are under active construction. Test Play mode stays available while the full Play Mode rules engine gets polished.</p>
+                <button id="open-playmode-page-button" type="button" class="primary-button coming-soon-button">Coming Soon</button>
               </div>
             </section>
           </aside>
@@ -295,6 +295,6 @@
       </div>
     </article>
   </template>
-  <script src="./app.js?v=20260521b"></script>
+  <script src="./app.js?v=20260603cardofday"></script>
 </body>
 </html>

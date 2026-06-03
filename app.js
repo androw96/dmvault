@@ -10,6 +10,8 @@ const PLAYTEST_CARD_BACK_FILE = "playtest-card-back.webp";
 const PLAYTEST_BALLOM_VIDEO_FILE = "ballom-evolve-destroy.mp4";
 const PLAYTEST_CRYSTAL_PALADIN_VIDEO_FILE = "crystal-paladin-evolve.mp4";
 const PLAYTEST_ALCADEIAS_VIDEO_FILE = "alcadeias-evolve.mp4";
+const PLAYMODE_PUBLIC_COMING_SOON = true;
+const DISCORD_INVITE_URL = "https://discord.gg/j3dYpfZ3hy";
 const PROFILE_CACHE_KEY = "paladins-vault-active-profile-cache";
 const PROFILE_DECKS_CACHE_KEY = "paladins-vault-profile-decks-cache";
 const AVATAR_PRESETS = {
@@ -36,7 +38,7 @@ const AVATAR_PRESET_FOCUS = {
   "la ura giga": { x: 50, y: 24, zoom: 240 },
   "sarius vizier of suppression": { x: 50, y: 24, zoom: 240 },
   "craze valkyrie the drastic": { x: 50, y: 23, zoom: 240 },
-  "urth purifying elemental": { x: 50, y: 22, zoom: 240 },
+  "urth purifying elemental": { x: 50, y: 32, zoom: 150 },
   "miar comet elemental": { x: 50, y: 22, zoom: 240 },
   "alcadeias lord of spirits": { x: 50, y: 20, zoom: 245 },
   "bronze arm tribe": { x: 49, y: 24, zoom: 235 },
@@ -50,10 +52,10 @@ const AVATAR_PRESET_FOCUS = {
   "bolshack dragon": { x: 50, y: 20, zoom: 245 },
   "bolmeteus steel dragon": { x: 50, y: 21, zoom: 212 },
   "billion degree dragon": { x: 50, y: 20, zoom: 245 },
-  "bombazar dragon of destiny": { x: 50, y: 19, zoom: 248 },
-  "death phoenix avatar of doom": { x: 50, y: 19, zoom: 248 },
+  "bombazar dragon of destiny": { x: 50, y: 34, zoom: 145 },
+  "death phoenix avatar of doom": { x: 50, y: 34, zoom: 145 },
   "wise starnoid avatar of hope": { x: 50, y: 21, zoom: 240 },
-  "aura pegasus avatar of life": { x: 50, y: 20, zoom: 244 },
+  "aura pegasus avatar of life": { x: 50, y: 34, zoom: 145 },
   "aura phoenix avatar of destiny": { x: 50, y: 19, zoom: 246 }
 };
 
@@ -89,6 +91,7 @@ const state = {
     maxCost: 14
   },
   exploreSearch: "",
+  exploreDeckSort: "likes",
   exploreDeckFilters: {
     containsCard: "",
     owner: "",
@@ -123,7 +126,7 @@ const state = {
   cardSearchDebounce: null,
   cardsRequestId: 0,
   playtest: {
-    title: "Playtest Sandbox",
+    title: "Test Play mode",
     coverImage: null,
     ownerLabel: "Paladin's Vault",
     sourceCards: [],
@@ -139,6 +142,7 @@ const state = {
   },
   playtestSelected: null,
   playtestEvolutionPick: null,
+  playmodeSelected: null,
   playmodeMatches: [],
   playmodeMatch: null,
   playmodePollTimer: null,
@@ -164,7 +168,6 @@ const elements = {
   cancelModifyDeckButton: document.querySelector("#cancel-modify-deck-button"),
   exportSelect: document.querySelector("#export-select"),
   openPlaytestButton: document.querySelector("#open-playtest-button"),
-  openAdminPlaytestButton: document.querySelector("#open-admin-playtest-button"),
   openPlaymodePageButton: document.querySelector("#open-playmode-page-button"),
   builderViewSelect: document.querySelector("#builder-view-select"),
   deckCoverSelect: document.querySelector("#deck-cover-select"),
@@ -188,6 +191,8 @@ const elements = {
   costFilter: document.querySelector("#cost-filter"),
   costFilterValue: document.querySelector("#cost-filter-value"),
   catalogGrid: document.querySelector("#catalog-grid"),
+  cardOfDayPanel: document.querySelector("#card-of-day-panel"),
+  cardOfDayCard: document.querySelector("#card-of-day-card"),
   deckList: document.querySelector("#deck-list"),
   printDeckSelect: document.querySelector("#print-deck-select"),
   civilizationBreakdown: document.querySelector("#civilization-breakdown"),
@@ -203,6 +208,7 @@ const elements = {
   cardDetailName: document.querySelector("#card-detail-name"),
   cardDetailCost: document.querySelector("#card-detail-cost"),
   cardDetailCivs: document.querySelector("#card-detail-civs"),
+  cardDetailAnimationSlot: document.querySelector("#card-detail-animation-slot"),
   cardDetailType: document.querySelector("#card-detail-type"),
   cardDetailRace: document.querySelector("#card-detail-race"),
   cardDetailPower: document.querySelector("#card-detail-power"),
@@ -228,6 +234,9 @@ const elements = {
   newProfileName: document.querySelector("#new-profile-name"),
   profileUsernameInput: document.querySelector("#profile-username-input"),
   saveProfileUsernameButton: document.querySelector("#save-profile-username-button"),
+  profileBioInput: document.querySelector("#profile-bio-input"),
+  profileBioEditorLabel: document.querySelector("#profile-bio-editor-label"),
+  saveProfileBioButton: document.querySelector("#save-profile-bio-button"),
   registerEmail: document.querySelector("#register-email"),
   registerAvatarUrl: document.querySelector("#register-avatar-url"),
   openRegisterAvatarPicker: document.querySelector("#open-register-avatar-picker"),
@@ -283,6 +292,7 @@ const elements = {
   exploreDecks: document.querySelector("#explore-decks"),
   exploreUsers: document.querySelector("#explore-users"),
   exploreTypeSelect: document.querySelector("#explore-type-select"),
+  exploreDeckSortSelect: document.querySelector("#explore-deck-sort"),
   exploreSearchInput: document.querySelector("#explore-search-input"),
   openExploreFiltersButton: document.querySelector("#open-explore-filters"),
   exploreFiltersModal: document.querySelector("#explore-filters-modal"),
@@ -367,6 +377,10 @@ const elements = {
   playtestLibrarySearchResults: null,
   closePlaytestLibraryModal: null,
   closePlaytestLibraryModalTargets: [],
+  playtestGraveyardModal: null,
+  playtestGraveyardList: null,
+  closePlaytestGraveyardModal: null,
+  closePlaytestGraveyardModalTargets: [],
   historyPageTitle: document.querySelector("#history-page-title"),
   historyPageSubtitle: document.querySelector("#history-page-subtitle"),
   adminMonthModal: null,
@@ -397,12 +411,24 @@ const elements = {
   playmodeCreateButton: document.querySelector("#playmode-create-button"),
   playmodeOpenCode: document.querySelector("#playmode-open-code"),
   playmodeOpenButton: document.querySelector("#playmode-open-button"),
+  playmodeActiveGamesPanel: document.querySelector(".playmode-active-games-panel"),
+  playmodeActiveList: document.querySelector("#playmode-active-list"),
   playmodeList: document.querySelector("#playmode-list"),
   playmodeStatus: document.querySelector("#playmode-status"),
   playmodeJoinPanel: document.querySelector("#playmode-join-panel"),
   playmodeJoinDeckSelect: document.querySelector("#playmode-join-deck-select"),
   playmodeJoinButton: document.querySelector("#playmode-join-button"),
   playmodeExitButton: document.querySelector("#playmode-exit-button"),
+  playmodeSpectateButton: document.querySelector("#playmode-spectate-button"),
+  playmodeActionOverlay: null,
+  playmodeCardPreview: null,
+  playmodeSpectateModal: null,
+  playmodeSpectateList: null,
+  playmodeSpectateStatus: null,
+  playmodeSpectateManualInput: null,
+  playmodeSpectateManualButton: null,
+  closePlaymodeSpectateModal: null,
+  closePlaymodeSpectateModalTargets: [],
   playmodeBoard: document.querySelector("#playmode-board"),
   playmodeBoardTitle: document.querySelector("#playmode-board-title"),
   playmodeBoardMeta: document.querySelector("#playmode-board-meta"),
@@ -446,6 +472,9 @@ function scheduleAfterPaint(callback) {
 
 function renderInitialPageShell() {
   renderAuthNavigation();
+  ensurePlaymodeNavLink();
+  ensureDiscordNavLink();
+  ensureDiscordFooterLink();
   renderWelcome();
   renderProfile();
   renderProfileDecks();
@@ -461,6 +490,128 @@ function renderInitialPageShell() {
   renderHeaderStats();
 }
 
+function discordIconMarkup() {
+  return `
+    <span class="discord-icon" aria-hidden="true">
+      <svg viewBox="0 0 32 32" role="img" focusable="false">
+        <path d="M11.4 9.7c1.2-.4 2.2-.5 3.1-.6l.3.7c1.5-.2 2.9-.2 4.4 0l.3-.7c.9.1 2 .3 3.1.6 2.1 3.1 2.9 6.2 2.6 9.2-1.4 1.1-2.9 1.8-4.5 2.2l-.9-1.5c.5-.2 1-.4 1.5-.7-.2-.1-.4-.3-.6-.4-2.9 1.3-6 1.3-8.9 0-.2.1-.4.3-.6.4.5.3 1 .6 1.5.7l-.9 1.5c-1.6-.4-3.1-1.1-4.5-2.2-.3-3 .5-6.1 2.6-9.2Zm3.1 5.8c0-.9-.6-1.6-1.5-1.6-.8 0-1.5.7-1.5 1.6s.7 1.6 1.5 1.6c.9 0 1.5-.7 1.5-1.6Zm6.1 0c0-.9-.6-1.6-1.5-1.6s-1.5.7-1.5 1.6.7 1.6 1.5 1.6 1.5-.7 1.5-1.6Z"></path>
+      </svg>
+    </span>
+  `;
+}
+
+function ensureDiscordNavLink() {
+  const navLinks = document.querySelector(".top-nav-links");
+  if (!navLinks) {
+    return;
+  }
+  const existing = navLinks.querySelector("[data-discord-nav-link]");
+  const link = existing || document.createElement("a");
+  link.className = "nav-link nav-discord-link";
+  link.href = DISCORD_INVITE_URL;
+  link.target = "_blank";
+  link.rel = "noopener noreferrer";
+  link.dataset.discordNavLink = "true";
+  link.textContent = "Discord";
+  const playmodeLink = navLinks.querySelector("[data-playmode-top-link]");
+  if (playmodeLink?.nextSibling !== link) {
+    navLinks.insertBefore(link, playmodeLink?.nextSibling || navLinks.querySelector("[data-login-nav], .nav-notification-dropdown, .nav-avatar-dropdown, [data-profile-menu]") || null);
+  }
+  elements.routeLinks = [...document.querySelectorAll("[data-route-link]")];
+}
+
+function ensureDiscordFooterLink() {
+  if (document.querySelector("[data-discord-footer-link]")) {
+    return;
+  }
+  const footer = document.querySelector(".legal-footer");
+  const card = document.createElement("a");
+  card.className = "discord-footer-link";
+  card.href = DISCORD_INVITE_URL;
+  card.target = "_blank";
+  card.rel = "noopener noreferrer";
+  card.dataset.discordFooterLink = "true";
+  card.innerHTML = `
+    ${discordIconMarkup()}
+    <span>
+      <strong>Join the Paladin's Vault Discord</strong>
+      <small>Decks, opponent search, updates, and community chat</small>
+    </span>
+  `;
+  if (footer) {
+    const bottom = footer.querySelector(".legal-footer-bottom");
+    if (bottom) {
+      bottom.insertBefore(card, bottom.firstChild);
+    } else {
+      footer.append(card);
+    }
+    return;
+  }
+  const shell = document.querySelector(".page-shell") || document.body;
+  const panel = document.createElement("footer");
+  panel.className = "panel legal-footer discord-footer-panel";
+  panel.append(card);
+  shell.append(panel);
+}
+
+function updateNavAuthGrouping() {
+  const navLinks = document.querySelector(".top-nav-links");
+  if (!navLinks) {
+    return;
+  }
+  const authCandidates = [
+    "[data-login-nav]",
+    "[data-signup-nav]",
+    ".nav-notification-dropdown",
+    ".nav-avatar-dropdown",
+    "[data-profile-menu]",
+    "[data-logout-nav]",
+  ]
+    .flatMap((selector) => [...navLinks.querySelectorAll(selector)])
+    .filter((item, index, list) => list.indexOf(item) === index);
+  for (const item of authCandidates) {
+    item.classList.remove("nav-auth-start");
+  }
+  const firstVisibleAuthItem = authCandidates.find((item) => !item.hidden && item.style.display !== "none");
+  firstVisibleAuthItem?.classList.add("nav-auth-start");
+}
+
+function renderPlaymodeConstructionPage() {
+  if (!isPlaymodePage) {
+    return;
+  }
+  elements.playmodeDenied?.setAttribute("hidden", "");
+  elements.playmodePanel?.setAttribute("hidden", "");
+  elements.playmodeBoard?.setAttribute("hidden", "");
+  if (elements.playmodeStatus) {
+    elements.playmodeStatus.textContent = "Coming Soon: Play Mode is under construction while we finish the rules engine.";
+  }
+  let panel = document.querySelector("#playmode-construction-page");
+  if (!panel) {
+    panel = document.createElement("section");
+    panel.id = "playmode-construction-page";
+    panel.className = "panel playmode-construction-page";
+    panel.innerHTML = `
+      <div class="playmode-construction-orb" aria-hidden="true"></div>
+      <p class="section-label">Coming Soon</p>
+      <h2>Under Construction</h2>
+      <p class="hero-text">Online Play Mode is being refined behind the vault doors. Test Play mode and deck building remain available while the full Duel Masters rules flow gets finished properly.</p>
+      <div class="playmode-construction-grid">
+        <span>Rules engine</span>
+        <span>Private matches</span>
+        <span>Async turns</span>
+      </div>
+      <div class="hero-actions">
+        <a class="primary-button" href="/builder">Build decks</a>
+        <a class="ghost-button" href="/">Back home</a>
+      </div>
+    `;
+    const hero = document.querySelector(".playmode-hero-panel");
+    (hero?.parentElement || document.querySelector("main") || document.body).append(panel);
+  }
+  panel.hidden = false;
+}
+
 async function initialize() {
   setBootLoadingState(true);
   ensureDeckDeleteModal();
@@ -469,9 +620,13 @@ async function initialize() {
   ensureAdminMonthModal();
   ensureAuthModalEnhancements();
   ensurePlaymodeInviteModal();
+  ensurePlaymodeActionOverlay();
+  ensurePlaymodeCardPreview();
+  ensurePlaymodeSpectateModal();
   ensurePlaytestActionOverlay();
   ensurePlaytestCinematicModal();
   ensurePlaytestLibraryModal();
+  ensurePlaytestGraveyardModal();
   ensureNotificationMenu();
   ensureMobileNavToggle();
   ensureCookieConsentBanner();
@@ -479,6 +634,11 @@ async function initialize() {
   primeCachedProfileState();
   renderInitialPageShell();
   bindEvents();
+  if (isPlaymodePage && PLAYMODE_PUBLIC_COMING_SOON) {
+    renderPlaymodeConstructionPage();
+    setBootLoadingState(false);
+    return;
+  }
   if (isPlaytestPage) {
     try {
       await loadPlaytestSandbox();
@@ -646,7 +806,7 @@ function playtestZones() {
   return ["drawPile", "hand", "shields", "mana", "battle", "graveyard"];
 }
 
-function emptyPlaytestState(title = "Playtest Sandbox", sourceCards = [], options = {}) {
+function emptyPlaytestState(title = "Test Play mode", sourceCards = [], options = {}) {
   return {
     title,
     coverImage: options.coverImage || null,
@@ -675,7 +835,7 @@ function persistPlaytestState() {
 
 function applyPlaytestState(nextState) {
   state.playtest = {
-    ...emptyPlaytestState(nextState?.title || "Playtest Sandbox", nextState?.sourceCards || []),
+    ...emptyPlaytestState(nextState?.title || "Test Play mode", nextState?.sourceCards || []),
     ...nextState
   };
   if (
@@ -1114,6 +1274,29 @@ function playAlcadeiasEvolutionAnimation() {
   playPlaytestCinematic(PLAYTEST_ALCADEIAS_VIDEO_FILE);
 }
 
+function cardAnimationFile(card) {
+  const name = normalizeName(card?.name || "");
+  if (name === "ballom master of death") {
+    return PLAYTEST_BALLOM_VIDEO_FILE;
+  }
+  if (name === "alcadeias lord of spirits") {
+    return PLAYTEST_ALCADEIAS_VIDEO_FILE;
+  }
+  if (name === "crystal paladin") {
+    return PLAYTEST_CRYSTAL_PALADIN_VIDEO_FILE;
+  }
+  return "";
+}
+
+function showCardAnimation(card) {
+  const filename = cardAnimationFile(card);
+  if (!filename) {
+    return;
+  }
+  ensurePlaytestCinematicModal();
+  playPlaytestCinematic(filename);
+}
+
 function isShieldTriggerCard(card) {
   return /\bshield\s*trigger\b/i.test(card?.text || "");
 }
@@ -1379,6 +1562,12 @@ function closePlaytestLibraryModal() {
   }
 }
 
+function closePlaytestGraveyardModal() {
+  if (elements.playtestGraveyardModal) {
+    elements.playtestGraveyardModal.hidden = true;
+  }
+}
+
 function tutorPlaytestCardFromLibrary(uid) {
   const index = state.playtest.drawPile.findIndex((entry) => entry.uid === uid);
   if (index === -1) {
@@ -1435,6 +1624,56 @@ function openPlaytestLibrarySearch() {
   }
   renderPlaytestLibrarySearchResults();
   queueMicrotask(() => elements.playtestLibrarySearchInput?.focus());
+}
+
+function returnPlaytestGraveyardCardToHand(uid) {
+  const index = state.playtest.graveyard.findIndex((entry) => entry.uid === uid);
+  if (index === -1) {
+    return;
+  }
+  const [card] = state.playtest.graveyard.splice(index, 1);
+  state.playtest.hand.push({ ...card, faceDown: false, tapped: false, manaProduced: [] });
+  state.playtestSelected = null;
+  state.playtestEvolutionPick = null;
+  persistPlaytestState();
+  closePlaytestGraveyardModal();
+  renderPlaytestSandbox();
+  setStatus(`Returned ${card.card.name} from graveyard to hand.`, "success");
+}
+
+function renderPlaytestGraveyardList() {
+  if (!elements.playtestGraveyardList) {
+    return;
+  }
+  elements.playtestGraveyardList.replaceChildren();
+  const cards = [...(state.playtest.graveyard || [])].reverse();
+  if (!cards.length) {
+    const empty = document.createElement("p");
+    empty.className = "hero-text playtest-zone-empty";
+    empty.textContent = "Graveyard is empty.";
+    elements.playtestGraveyardList.append(empty);
+    return;
+  }
+  for (const entry of cards) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "playtest-search-result playtest-graveyard-result";
+    button.innerHTML = `
+      <strong>${escapeHtml(entry.card.name)}</strong>
+      <span>${escapeHtml(`${entry.card.cost} mana • ${entry.card.type}${entry.card.race_label ? ` • ${entry.card.race_label}` : ""}`)}</span>
+      <small>Return to hand</small>
+    `;
+    button.addEventListener("click", () => returnPlaytestGraveyardCardToHand(entry.uid));
+    elements.playtestGraveyardList.append(button);
+  }
+}
+
+function openPlaytestGraveyardModal() {
+  if (!elements.playtestGraveyardModal) {
+    return;
+  }
+  elements.playtestGraveyardModal.hidden = false;
+  renderPlaytestGraveyardList();
 }
 
 function advancePlaytestTurn() {
@@ -1599,12 +1838,17 @@ function playtestActionDefinitions(zoneName, card) {
   }
   if (zoneName === "graveyard") {
     actions.push(
+      { label: "Show All", run: () => openPlaytestGraveyardModal(), tone: "ghost" },
       { label: "Hand", run: () => movePlaytestCard("graveyard", card.uid, "hand", { faceDown: false, resetTapped: true }) }
     );
   }
   if (zoneName === "shields") {
     actions.push(
-      { label: "Break", run: () => movePlaytestCard("shields", card.uid, isShieldTriggerCard(card.card) ? "battle" : "hand", { faceDown: false, resetTapped: true }) },
+      {
+        label: "Break",
+        run: () => movePlaytestCard("shields", card.uid, isShieldTriggerCard(card.card) ? "battle" : "hand", { faceDown: false, resetTapped: true })
+      },
+      { label: "Hand", run: () => movePlaytestCard("shields", card.uid, "hand", { faceDown: false, resetTapped: true }) },
       { label: "Graveyard", run: () => movePlaytestCard("shields", card.uid, "graveyard", { faceDown: false, resetTapped: true }) }
     );
   }
@@ -1879,9 +2123,29 @@ function renderPlaytestZone(zoneName, container) {
     renderPlaytestZoneEmpty(container, `${zoneLabel(zoneName)} is empty.`);
     return;
   }
+  if (zoneName === "graveyard") {
+    renderPlaytestGraveyardStack(container, cards);
+    return;
+  }
   for (const card of cards) {
     container.append(buildPlaytestCard(zoneName, card));
   }
+}
+
+function renderPlaytestGraveyardStack(container, cards) {
+  const topCard = cards[cards.length - 1];
+  const stack = document.createElement("div");
+  stack.className = "playtest-graveyard-stack";
+  stack.append(buildPlaytestCard("graveyard", topCard));
+  const hiddenCount = Math.max(0, cards.length - 1);
+  const meta = document.createElement("div");
+  meta.className = "playtest-graveyard-stack-meta";
+  meta.innerHTML = `
+    <strong>${hiddenCount ? `+${hiddenCount}` : "Top"}</strong>
+    <span>${hiddenCount === 1 ? "card underneath" : "cards underneath"}</span>
+  `;
+  stack.append(meta);
+  container.append(stack);
 }
 
 function playtestCivilizationColor(civilization) {
@@ -1994,6 +2258,15 @@ function playmodePlayerName(player, fallbackSeat = 1) {
   return player?.username ? displayUsername(player.username) : `Player ${fallbackSeat}`;
 }
 
+function playmodeAvatarMarkup(player, fallbackSeat = 1) {
+  const name = playmodePlayerName(player, fallbackSeat);
+  const avatarUrl = player?.avatar_url ? resolveAssetUrl(player.avatar_url) : "";
+  if (avatarUrl) {
+    return `<div class="playmode-avatar-orb has-avatar" style="background-image:url('${escapeHtml(avatarUrl)}')" aria-label="${escapeHtml(name)}"></div>`;
+  }
+  return `<div class="playmode-avatar-orb" aria-label="${escapeHtml(name)}">${escapeHtml(name.slice(0, 1).toUpperCase())}</div>`;
+}
+
 function activePlaymodePlayer() {
   if (!state.playmodeMatch) {
     return null;
@@ -2030,9 +2303,10 @@ function playmodeTurnStatusText() {
     return `Your response needed • ${match.pending_choice.message || "Choose an option"}`;
   }
   if (match.viewer_seat === match.active_seat) {
-    return `Your turn • ${phase}`;
+    return `Your turn (${activeName}) • ${phase}`;
   }
-  return `Waiting for ${activeName}`;
+  const replay = match.last_move_summary ? ` • Opponent replay: ${match.last_move_summary}` : "";
+  return `${activeName}'s turn • Waiting${replay}`;
 }
 
 function syncPlaymodeMatchFocus() {
@@ -2072,10 +2346,35 @@ function schedulePlaymodePolling() {
   }, 8000);
 }
 
-function renderPlaymodeZoneCards(cards, zoneName, { hidden = false, count = 0 } = {}) {
+function playmodeCurrentAttack() {
+  const choiceAttack = state.playmodeMatch?.pending_choice?.pending_attack;
+  return state.playmodeMatch?.pending_attack || choiceAttack || null;
+}
+
+function playmodeAttackMarker(seat, zoneName, uid) {
+  const attack = playmodeCurrentAttack();
+  if (!attack || !uid) {
+    return { classes: "", label: "" };
+  }
+  const attackerSeat = Number(attack.seat || state.playmodeMatch?.active_seat || 0);
+  const targetSeat = Number(attack.target_seat || 0);
+  if (zoneName === "battle" && Number(seat) === attackerSeat && attack.uid === uid) {
+    const hasTarget = Boolean(attack.target_kind);
+    return {
+      classes: ` is-attack-source${hasTarget ? " has-attack-target" : " needs-attack-target"}`,
+      label: hasTarget ? "Attack locked" : "Choose shield or tapped creature",
+    };
+  }
+  if (attack.target_uid === uid && Number(seat) === targetSeat && (zoneName === "shields" || zoneName === "battle")) {
+    return { classes: " is-attack-target", label: "Attack target" };
+  }
+  return { classes: "", label: "" };
+}
+
+function renderPlaymodeZoneCards(cards, zoneName, { hidden = false, count = 0, seat = null } = {}) {
   if (hidden) {
     const ghosts = Array.from({ length: Math.min(5, count || 0) }, () => `
-      <article class="playmode-mini-card is-facedown${zoneName === "mana" ? " is-mana" : ""}">
+      <article class="playmode-mini-card is-facedown${zoneName === "mana" ? " is-mana" : ""}" data-playmode-seat="${escapeHtml(String(seat || ""))}" data-playmode-preview-image="${escapeHtml(playtestCoverImageUrl())}" data-playmode-preview-name="Hidden card">
         <span class="playmode-mini-back" style="background-image:url('${playtestCoverImageUrl()}')"></span>
       </article>
     `).join("");
@@ -2086,12 +2385,19 @@ function renderPlaymodeZoneCards(cards, zoneName, { hidden = false, count = 0 } 
   }
   return cards.map((card) => {
     const pendingCandidate = playmodePendingCandidate(zoneName, card.uid);
+    const attackMarker = playmodeAttackMarker(seat, zoneName, card.uid);
     const image = card.face_down
       ? `<span class="playmode-mini-back" style="background-image:url('${playtestCoverImageUrl()}')"></span>`
       : `<img class="playmode-mini-image" src="${escapeHtml(resolveAssetUrl(card.image_path || DEFAULT_LOGO_URL))}" alt="${escapeHtml(card.name)}" loading="lazy" decoding="async">`;
+    const previewImage = card.face_down ? playtestCoverImageUrl() : resolveAssetUrl(card.image_path || DEFAULT_LOGO_URL);
+    const producedMana = Array.isArray(card.mana_produced) ? card.mana_produced : [];
+    const manaOrbs = producedMana.length
+      ? `<div class="playmode-mana-orbs" aria-label="${escapeHtml(producedMana.join(" / "))} mana">${producedMana.map((civilization) => `<span class="playtest-mana-orb playmode-mana-orb" title="${escapeHtml(civilization)} mana" style="--mana-orb:${escapeHtml(playtestCivilizationColor(civilization))}"></span>`).join("")}</div>`
+      : "";
     return `
-      <article class="playmode-mini-card${card.tapped ? " is-tapped" : ""}${card.face_down ? " is-facedown" : ""}${zoneName === "mana" ? " is-mana" : ""}${pendingCandidate ? " is-choice-candidate" : ""}" data-playmode-zone="${escapeHtml(zoneName)}" data-playmode-card-uid="${escapeHtml(card.uid || "")}">
+      <article class="playmode-mini-card${card.tapped ? " is-tapped" : ""}${card.face_down ? " is-facedown" : ""}${zoneName === "mana" ? " is-mana" : ""}${pendingCandidate ? " is-choice-candidate" : ""}${attackMarker.classes}" data-playmode-seat="${escapeHtml(String(seat || ""))}" data-playmode-zone="${escapeHtml(zoneName)}" data-playmode-card-uid="${escapeHtml(card.uid || "")}" data-attack-label="${escapeHtml(attackMarker.label)}" data-playmode-preview-image="${escapeHtml(previewImage)}" data-playmode-preview-name="${escapeHtml(card.face_down ? 'Hidden card' : card.name)}">
         ${image}
+        ${manaOrbs}
       </article>
     `;
   }).join("");
@@ -2126,7 +2432,7 @@ function renderPlaymodePrivateCounts(player, zones) {
           ${graveyardOpen ? "Hide graveyard" : `Show ${zones.graveyard_count ?? 0} cards`}
         </button>
         <div class="playmode-mini-row${graveyardOpen ? "" : " is-collapsed"}">
-          ${graveyardOpen ? renderPlaymodeZoneCards(graveyard, "graveyard") : ""}
+          ${graveyardOpen ? renderPlaymodeZoneCards(graveyard, "graveyard", { seat: player.seat }) : ""}
         </div>
       </article>
     </div>
@@ -2141,11 +2447,22 @@ function playmodePendingCandidate(zoneName, uid) {
   return (choice.candidates || []).find((candidate) => candidate.zone === zoneName && candidate.uid === uid) || null;
 }
 
+function renderPlaymodeTableZone(zones, zoneName, label, count = null, seat = null) {
+  const zoneCards = zones[zoneName] || [];
+  const zoneCount = count ?? zoneCards.length;
+  return `
+    <section class="playmode-zone-card playmode-zone-${escapeHtml(zoneName)}">
+      <div class="playmode-zone-head"><span>${escapeHtml(label)}</span><strong>${zoneCount}</strong></div>
+      <div class="playmode-mini-row">${renderPlaymodeZoneCards(zoneCards, zoneName, { seat })}</div>
+    </section>
+  `;
+}
+
 function renderPlaymodeSeat(container, player, viewerSeat, adminOverride = false) {
   if (!container || !player) {
     return;
   }
-  const isViewer = adminOverride || viewerSeat === player.seat;
+  const isViewer = viewerSeat === player.seat;
   const isOpponentPrivacy = !isViewer;
   const isActive = state.playmodeMatch?.status === "active" && state.playmodeMatch?.active_seat === player.seat;
   const zones = player.zones || {};
@@ -2155,30 +2472,23 @@ function renderPlaymodeSeat(container, player, viewerSeat, adminOverride = false
     shell.classList.toggle("is-opponent-seat", !isViewer);
     shell.classList.toggle("is-active-seat", isActive);
   }
-  const privateCounts = isOpponentPrivacy ? renderPlaymodePrivateCounts(player, zones) : "";
-  const sideInfoMarkup = isOpponentPrivacy
-    ? privateCounts
-    : `
-      <div class="playmode-private-counts">
-        <article class="playmode-zone-card playmode-count-card">
-          <div class="playmode-zone-head"><span>Library</span><strong>${zones.deck_count ?? 0}</strong></div>
-          <p class="playmode-zone-statline">Deck order hidden.</p>
-        </article>
-        <article class="playmode-zone-card playmode-count-card">
-          <div class="playmode-zone-head"><span>Graveyard</span><strong>${zones.graveyard_count ?? 0}</strong></div>
-          <button class="ghost-button playmode-graveyard-toggle" type="button" data-playmode-graveyard-seat="${escapeHtml(String(player.seat))}">
-            ${isPlaymodeGraveyardOpen(player.seat) ? "Hide graveyard" : `Show ${zones.graveyard_count ?? 0} cards`}
-          </button>
-          <div class="playmode-mini-row${isPlaymodeGraveyardOpen(player.seat) ? "" : " is-collapsed"}">
-            ${isPlaymodeGraveyardOpen(player.seat) ? renderPlaymodeZoneCards(zones.graveyard || [], "graveyard") : ""}
-          </div>
-        </article>
-      </div>
-    `;
+  const graveyardOpen = isPlaymodeGraveyardOpen(player.seat);
+  const graveyard = zones.graveyard || [];
+  const tableZones = isViewer
+    ? [
+        renderPlaymodeTableZone(zones, "battle", "Battle Zone", null, player.seat),
+        renderPlaymodeTableZone(zones, "shields", "Shields", zones.shield_count ?? 0, player.seat),
+        renderPlaymodeTableZone(zones, "mana", "Mana Zone", null, player.seat),
+      ]
+    : [
+        renderPlaymodeTableZone(zones, "mana", "Mana Zone", null, player.seat),
+        renderPlaymodeTableZone(zones, "shields", "Shields", zones.shield_count ?? 0, player.seat),
+        renderPlaymodeTableZone(zones, "battle", "Battle Zone", null, player.seat),
+      ];
   container.innerHTML = `
     <div class="playmode-seat-frame${isViewer ? " is-self" : " is-opponent"}">
       <aside class="playmode-player-card">
-        <div class="playmode-avatar-orb">${escapeHtml(playmodePlayerName(player, player.seat).slice(0, 1).toUpperCase())}</div>
+        ${playmodeAvatarMarkup(player, player.seat)}
         <strong>${escapeHtml(playmodePlayerName(player, player.seat))}</strong>
         <span>${escapeHtml(player.deck_title || "No deck selected")}</span>
         <div class="playmode-player-stats">
@@ -2190,27 +2500,24 @@ function renderPlaymodeSeat(container, player, viewerSeat, adminOverride = false
         <span class="chip${isActive ? " is-active-turn" : ""}">${isActive ? "Active Turn" : (player.ready ? "Ready" : "Waiting")}</span>
       </aside>
       <div class="playmode-table-zones">
-        <section class="playmode-zone-card playmode-zone-shields">
-          <div class="playmode-zone-head"><span>Shields</span><strong>${zones.shield_count ?? 0}</strong></div>
-          <div class="playmode-mini-row">${renderPlaymodeZoneCards(zones.shields || [], "shields")}</div>
-        </section>
-        <section class="playmode-zone-card playmode-zone-battle">
-          <div class="playmode-zone-head"><span>Battle Zone</span><strong>${(zones.battle || []).length}</strong></div>
-          <div class="playmode-mini-row">${renderPlaymodeZoneCards(zones.battle || [], "battle")}</div>
-        </section>
-        <section class="playmode-zone-card playmode-zone-mana">
-          <div class="playmode-zone-head"><span>Mana Zone</span><strong>${(zones.mana || []).length}</strong></div>
-          <div class="playmode-mini-row">${renderPlaymodeZoneCards(zones.mana || [], "mana")}</div>
-        </section>
+        ${tableZones.join("")}
       </div>
-      <aside class="playmode-zone-sidebar">
-        ${sideInfoMarkup}
+      <aside class="playmode-zone-sidebar playmode-shobu-rail">
+        <button class="ghost-button playmode-graveyard-toggle" type="button" data-playmode-graveyard-seat="${escapeHtml(String(player.seat))}">
+          Graveyard [${zones.graveyard_count ?? 0}]
+        </button>
+        <div class="playmode-mini-row${graveyardOpen ? "" : " is-collapsed"}">
+          ${graveyardOpen ? renderPlaymodeZoneCards(graveyard, "graveyard", { seat: player.seat }) : renderPlaymodeZoneCards([], "graveyard", { hidden: true, count: 1, seat: player.seat })}
+        </div>
+        <div class="playmode-shobu-pile-label">Deck [${zones.deck_count ?? 0}]</div>
+        <div class="playmode-mini-row">${renderPlaymodeZoneCards([], "drawPile", { hidden: true, count: 1, seat: player.seat })}</div>
+        <div class="playmode-shobu-pile-label">Hand [${zones.hand_count ?? 0}]</div>
       </aside>
     </div>
     ${isViewer ? `
       <section class="playmode-hand-strip">
         <div class="playmode-zone-head"><span>Hand</span><strong>${zones.hand_count ?? 0}</strong></div>
-        <div class="playmode-mini-row">${renderPlaymodeZoneCards(zones.hand || [], "hand")}</div>
+        <div class="playmode-mini-row">${renderPlaymodeZoneCards(zones.hand || [], "hand", { seat: player.seat })}</div>
       </section>
     ` : ""}
   `;
@@ -2221,8 +2528,15 @@ function renderPlaymodeSeat(container, player, viewerSeat, adminOverride = false
   }
   for (const card of container.querySelectorAll("[data-playmode-card-uid]")) {
     card.addEventListener("click", () => {
-      void handlePlaymodeCardClick(player.seat, card.dataset.playmodeZone, card.dataset.playmodeCardUid);
+      void handlePlaymodeCardClick(player.seat, card.dataset.playmodeZone, card.dataset.playmodeCardUid, card);
     });
+  }
+  for (const card of container.querySelectorAll("[data-playmode-preview-image]")) {
+    card.addEventListener("mouseenter", (event) => showPlaymodeCardPreview(card, event));
+    card.addEventListener("mousemove", (event) => positionPlaymodeCardPreview(event));
+    card.addEventListener("mouseleave", hidePlaymodeCardPreview);
+    card.addEventListener("focus", (event) => showPlaymodeCardPreview(card, event));
+    card.addEventListener("blur", hidePlaymodeCardPreview);
   }
 }
 
@@ -2324,6 +2638,20 @@ function findPlaymodeZoneCard(zone = [], uid) {
   return { index, card: index >= 0 ? zone[index] : null };
 }
 
+function playmodeViewZonesForSeat(seat) {
+  if (!state.playmodeMatch) {
+    return null;
+  }
+  return seat === 2
+    ? state.playmodeMatch.player_two?.zones || null
+    : state.playmodeMatch.player_one?.zones || null;
+}
+
+function findPlaymodeViewCard(seat, zoneName, uid) {
+  const zone = playmodeViewZonesForSeat(seat)?.[zoneName] || [];
+  return zone.find((entry) => entry.uid === uid) || null;
+}
+
 function normalizePlaymodeCardEntry(viewCard) {
   return {
     uid: viewCard.uid,
@@ -2340,7 +2668,7 @@ function normalizePlaymodeCardEntry(viewCard) {
     },
     tapped: Boolean(viewCard.tapped),
     faceDown: Boolean(viewCard.face_down),
-    manaProduced: [],
+    manaProduced: Array.isArray(viewCard.mana_produced) ? viewCard.mana_produced : [],
     underlays: []
   };
 }
@@ -2375,10 +2703,45 @@ function activePlaymodeMatchStateFromView() {
   return matchState;
 }
 
-async function handlePlaymodeCardClick(seat, zoneName, uid) {
+async function handlePlaymodeCardClick(seat, zoneName, uid, anchor = null) {
   if (!state.playmodeMatch || !state.activeProfileId || !canControlActivePlaymodeSeat()) {
     setPlaymodeStatus("It is not your turn yet, or this board cannot be controlled from this view.");
     return;
+  }
+  const attack = playmodeCurrentAttack();
+  const activeSeat = state.playmodeMatch.active_seat;
+  if (
+    attack
+    && Number(attack.seat || activeSeat) === Number(activeSeat)
+    && Number(seat) !== Number(activeSeat)
+    && !attack.target_kind
+    && currentPlaymodePhase() === "attack"
+  ) {
+    if (zoneName === "shields") {
+      await runPlaymodeAction({
+        profile_id: state.activeProfileId,
+        action: "break_shield",
+        seat: activeSeat,
+        target_seat: seat,
+        target_uid: uid
+      });
+      return;
+    }
+    if (zoneName === "battle") {
+      const target = findPlaymodeViewCard(seat, zoneName, uid);
+      if (!target?.tapped) {
+        setPlaymodeStatus("Only tapped creatures can be attacked.");
+        return;
+      }
+      await runPlaymodeAction({
+        profile_id: state.activeProfileId,
+        action: "battle_creature",
+        seat: activeSeat,
+        target_seat: seat,
+        target_uid: uid
+      });
+      return;
+    }
   }
   const pendingCandidate = playmodePendingCandidate(zoneName, uid);
   if (pendingCandidate) {
@@ -2395,29 +2758,105 @@ async function handlePlaymodeCardClick(seat, zoneName, uid) {
     setPlaymodeStatus(state.playmodeMatch.pending_choice.message || "Resolve the pending choice first.");
     return;
   }
+  if (state.playmodeSelected?.seat === seat && state.playmodeSelected?.zone === zoneName && state.playmodeSelected?.uid === uid) {
+    state.playmodeSelected = null;
+  } else {
+    state.playmodeSelected = { seat, zone: zoneName, uid, anchor };
+  }
+  renderPlaymodeActionOverlay();
+}
+
+function playmodeActionDefinitions(seat, zoneName, uid) {
   const phase = currentPlaymodePhase();
   const activeSeat = state.playmodeMatch.active_seat;
-  let action = null;
   const body = { profile_id: state.activeProfileId, seat, zone: zoneName, uid };
+  const actions = [];
   if (seat === activeSeat && zoneName === "mana") {
-    action = "tap_mana";
-  } else if (seat === activeSeat && zoneName === "hand" && phase === "charge") {
-    action = "charge";
-  } else if (seat === activeSeat && zoneName === "hand" && phase === "play") {
-    action = "play_card";
-  } else if (seat === activeSeat && zoneName === "battle" && phase === "attack") {
-    action = "attack";
-  } else if (seat !== activeSeat && zoneName === "shields" && phase === "attack") {
-    action = "break_shield";
-    body.seat = activeSeat;
-    body.target_seat = seat;
-    body.target_uid = uid;
+    actions.push({ label: "Tap / Ready", run: () => runPlaymodeAction({ ...body, action: "tap_mana" }) });
   }
-  if (!action) {
-    setPlaymodeStatus(`This card cannot be used in ${playmodePhaseLabel(phase)} phase.`);
+  if (seat === activeSeat && zoneName === "hand") {
+    const card = findPlaymodeViewCard(seat, zoneName, uid);
+    const playLabel = String(card?.type || "").toLowerCase().includes("evolution") ? "Evolve" : "Play";
+    if (phase === "charge") {
+      actions.push({ label: "Charge", run: () => runPlaymodeAction({ ...body, action: "charge" }) });
+    } else if (PLAYMODE_PHASES.indexOf(phase) < PLAYMODE_PHASES.indexOf("charge")) {
+      actions.push({ label: "Go to Charge", run: () => advancePlaymodeToPhase("charge") });
+    }
+    if (phase === "play") {
+      actions.push({ label: playLabel, run: () => runPlaymodeAction({ ...body, action: "play_card" }) });
+    } else if (PLAYMODE_PHASES.indexOf(phase) < PLAYMODE_PHASES.indexOf("play")) {
+      actions.push({ label: `Go to ${playLabel}`, run: () => advancePlaymodeToPhase("play") });
+    }
+  }
+  if (seat === activeSeat && zoneName === "battle") {
+    actions.push({ label: "Attack", disabled: phase !== "attack", run: () => runPlaymodeAction({ ...body, action: "attack" }) });
+  }
+  if (seat !== activeSeat && zoneName === "battle" && phase === "attack") {
+    const target = findPlaymodeViewCard(seat, zoneName, uid);
+    actions.push({
+      label: target?.tapped ? "Attack Creature" : "Only tapped creatures",
+      disabled: !target?.tapped,
+      run: () => runPlaymodeAction({ ...body, action: "battle_creature", seat: activeSeat, target_seat: seat, target_uid: uid })
+    });
+  }
+  if (seat !== activeSeat && zoneName === "shields" && phase === "attack") {
+    const attack = playmodeCurrentAttack();
+    if (attack && Number(attack.seat || activeSeat) === Number(activeSeat) && !attack.target_kind) {
+      actions.push({
+        label: "Break Shield",
+        run: () => runPlaymodeAction({ ...body, action: "break_shield", seat: activeSeat, target_seat: seat, target_uid: uid })
+      });
+    }
+  }
+  return actions;
+}
+
+function renderPlaymodeActionOverlay() {
+  ensurePlaymodeActionOverlay();
+  const overlay = elements.playmodeActionOverlay;
+  if (!overlay) return;
+  overlay.replaceChildren();
+  overlay.hidden = true;
+  overlay.style.visibility = "hidden";
+  if (!state.playmodeSelected) return;
+  const { seat, zone, uid } = state.playmodeSelected;
+  const anchor = state.playmodeSelected.anchor?.isConnected
+    ? state.playmodeSelected.anchor
+    : document.querySelector(`.playmode-mini-card[data-playmode-zone="${window.CSS?.escape ? CSS.escape(zone) : zone}"][data-playmode-card-uid="${window.CSS?.escape ? CSS.escape(uid) : uid}"]`);
+  const actions = playmodeActionDefinitions(seat, zone, uid);
+  if (!anchor || !actions.length) {
+    const handHint = zone === "hand" ? " Hand cards can be charged in Charge phase or played in Play phase." : "";
+    setPlaymodeStatus(`This card cannot be used in ${playmodePhaseLabel(currentPlaymodePhase())} phase.${handHint}`);
     return;
   }
-  await runPlaymodeAction({ ...body, action });
+  for (const action of actions) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = action.disabled ? "small-button ghost-button" : "small-button";
+    button.textContent = action.label;
+    button.disabled = Boolean(action.disabled);
+    button.addEventListener("click", (event) => {
+      event.stopPropagation();
+      if (!action.disabled) void action.run();
+    });
+    overlay.append(button);
+  }
+  const rect = anchor.getBoundingClientRect();
+  const padding = 12;
+  const gap = 10;
+  const menuWidth = 168;
+  overlay.style.width = `${menuWidth}px`;
+  overlay.hidden = false;
+  overlay.style.visibility = "hidden";
+  const menuHeight = overlay.offsetHeight || (actions.length * 46);
+  let top = rect.top - menuHeight - gap;
+  if (top < padding) top = rect.bottom + gap;
+  if (top + menuHeight > window.innerHeight - padding) top = Math.max(padding, window.innerHeight - menuHeight - padding);
+  let left = rect.left + (rect.width / 2) - (menuWidth / 2);
+  left = Math.max(padding, Math.min(left, window.innerWidth - menuWidth - padding));
+  overlay.style.top = `${top + window.scrollY}px`;
+  overlay.style.left = `${left + window.scrollX}px`;
+  overlay.style.visibility = "visible";
 }
 
 async function runPlaymodeAction(payload) {
@@ -2425,6 +2864,7 @@ async function runPlaymodeAction(payload) {
     return;
   }
   try {
+    state.playmodeSelected = null;
     state.playmodeMatch = await fetchJson(`${API_BASE}/playmode/matches/${encodeURIComponent(state.playmodeMatch.public_id)}/action`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -2434,6 +2874,28 @@ async function runPlaymodeAction(payload) {
     renderPlaymodePage();
   } catch (error) {
     setPlaymodeStatus(error.message || "Playmode action failed.");
+  }
+}
+
+async function advancePlaymodeToPhase(targetPhase) {
+  if (!state.playmodeMatch || !state.activeProfileId || !canControlActivePlaymodeSeat()) {
+    setPlaymodeStatus("It is not your turn yet, or this board cannot be controlled from this view.");
+    return;
+  }
+  const targetIndex = PLAYMODE_PHASES.indexOf(targetPhase);
+  let safety = 0;
+  while (state.playmodeMatch && currentPlaymodePhase() !== targetPhase && safety < PLAYMODE_PHASES.length) {
+    const currentIndex = PLAYMODE_PHASES.indexOf(currentPlaymodePhase());
+    if (currentIndex === -1 || targetIndex === -1 || currentIndex > targetIndex) {
+      setPlaymodeStatus(`You can only move forward through the phase order. Current phase: ${playmodePhaseLabel(currentPlaymodePhase())}.`);
+      return;
+    }
+    safety += 1;
+    await runPlaymodeAction({
+      profile_id: state.activeProfileId,
+      action: "advance_phase",
+      seat: state.playmodeMatch.active_seat
+    });
   }
 }
 
@@ -2525,24 +2987,35 @@ function renderPlaymodePhasePanel() {
   const activeSeat = match.active_seat || 1;
   const activeName = playmodePlayerName(activePlaymodePlayer(), activeSeat);
   if (elements.playmodePhaseTitle) {
-    elements.playmodePhaseTitle.textContent = `${playmodePhaseLabel(phase)} Phase`;
+    elements.playmodePhaseTitle.textContent = `${activeName}'s Turn`;
   }
   if (elements.playmodePhaseCopy) {
     elements.playmodePhaseCopy.textContent = ({
-      untap: `${activeName}'s turn • Untap all tapped mana and creatures.`,
-      draw: `${activeName}'s turn • Draw one card. Deck-out is checked here.`,
-      charge: `${activeName}'s turn • Click a card in hand to charge it, or skip to play phase.`,
-      play: `${activeName}'s turn • Click a card in hand to play it.`,
-      attack: `${activeName}'s turn • Click a creature in battle zone to tap it as an attacker.`,
-      end: `${activeName}'s turn • Pass to the opponent.`
-    })[phase] || `${activeName}'s turn`;
+      untap: "Auto resolving untap...",
+      draw: "Auto drawing a card...",
+      charge: "Charge Phase • Click a card in hand to charge it, or skip to play phase.",
+      play: "Play Phase • Tap mana, then click a card in hand to play it.",
+      attack: "Attack Phase • Click a creature in battle zone to attack.",
+      end: "Auto passing the turn..."
+    })[phase] || `${playmodePhaseLabel(phase)} Phase`;
   }
   if (elements.playmodePhaseTrack) {
     elements.playmodePhaseTrack.replaceChildren();
+    const canControl = canControlActivePlaymodeSeat() && match.status === "active";
     for (const item of PLAYMODE_PHASES) {
-      const chip = document.createElement("span");
+      const chip = document.createElement("button");
+      chip.type = "button";
       chip.className = `chip playmode-phase-chip${item === phase ? " is-active" : ""}`;
       chip.textContent = playmodePhaseLabel(item);
+      const currentIndex = PLAYMODE_PHASES.indexOf(phase);
+      const targetIndex = PLAYMODE_PHASES.indexOf(item);
+      chip.disabled = !canControl || targetIndex <= currentIndex;
+      chip.title = chip.disabled
+        ? (item === phase ? "Current phase" : "You can only move forward through phases.")
+        : `Advance to ${playmodePhaseLabel(item)} phase`;
+      chip.addEventListener("click", () => {
+        void advancePlaymodeToPhase(item);
+      });
       elements.playmodePhaseTrack.append(chip);
     }
   }
@@ -2565,7 +3038,31 @@ function renderPlaymodePhasePanel() {
     elements.playmodeConcedeButton.disabled = !canConcede;
     elements.playmodeConcedeButton.title = canConcede ? "Concede this match" : playmodeTurnStatusText();
   }
+  renderPlaymodeEventLog();
   renderPlaymodePendingChoicePanel();
+}
+
+function renderPlaymodeEventLog() {
+  if (!elements.playmodePhasePanel) {
+    return;
+  }
+  let panel = elements.playmodePhasePanel.querySelector("[data-playmode-event-log]");
+  if (!panel) {
+    panel = document.createElement("section");
+    panel.dataset.playmodeEventLog = "true";
+    panel.className = "playmode-event-log";
+    elements.playmodePhasePanel.append(panel);
+  }
+  const entries = Array.isArray(state.playmodeMatch?.event_log) ? state.playmodeMatch.event_log.slice(-18).reverse() : [];
+  panel.innerHTML = `
+    <div class="playmode-event-log-head">
+      <strong>Event Log</strong>
+      <span>${escapeHtml(playmodeTurnStatusText())}</span>
+    </div>
+    <div class="playmode-event-log-list">
+      ${entries.length ? entries.map((entry) => `<p>${escapeHtml(entry)}</p>`).join("") : "<p>No events yet.</p>"}
+    </div>
+  `;
 }
 
 function renderPlaymodePendingChoicePanel() {
@@ -2614,11 +3111,11 @@ function renderPlaymodePendingChoicePanel() {
     list.append(button);
   }
   panel.append(list);
-  if (choice.kind === "blocker") {
+  if (choice.kind === "blocker" || choice.kind === "attack_response") {
     const pass = document.createElement("button");
     pass.type = "button";
     pass.className = "primary-button";
-    pass.textContent = "Pass block";
+    pass.textContent = choice.kind === "attack_response" ? "No block / resolve attack" : "Pass block";
     pass.addEventListener("click", () => {
       void runPlaymodeAction({
         profile_id: state.activeProfileId,
@@ -2736,6 +3233,10 @@ function renderPlaymodePage() {
   if (!isPlaymodePage) {
     return;
   }
+  if (PLAYMODE_PUBLIC_COMING_SOON) {
+    renderPlaymodeConstructionPage();
+    return;
+  }
   syncPlaymodeMatchFocus();
   const matchCodeUnlocked = hasPlaymodeMatchRoute();
   const loggedIn = Boolean(state.activeProfileId);
@@ -2777,6 +3278,34 @@ function renderPlaymodePage() {
       elements.playmodeJoinDeckSelect.value = current;
     }
   }
+  const renderMatchRow = (match) => {
+    const row = document.createElement("article");
+    row.className = "builder-surface playmode-match-row";
+    row.innerHTML = `
+      <strong>${escapeHtml(match.player_one_deck_title || "Deck")} vs ${escapeHtml(match.player_two_deck_title || "Waiting for opponent")}</strong>
+      <span>${escapeHtml(match.mode)} • ${escapeHtml(match.status)} • Turn ${match.current_turn} • ${escapeHtml(playmodePhaseLabel(match.current_phase || "untap"))}</span>
+      <span class="playmode-match-code">Match code: <strong>${escapeHtml(match.public_id)}</strong></span>
+      <a class="ghost-button" href="${escapeHtml(playmodeMatchUrl(match.public_id))}">Open Match</a>
+    `;
+    return row;
+  };
+  if (elements.playmodeActiveList) {
+    const activeMatches = (state.playmodeMatches || []).filter((match) => match.needs_action);
+    if (elements.playmodeActiveGamesPanel) {
+      elements.playmodeActiveGamesPanel.hidden = activeMatches.length === 0;
+    }
+    elements.playmodeActiveList.replaceChildren();
+    if (!activeMatches.length) {
+      const empty = document.createElement("p");
+      empty.className = "hero-text playmode-zone-empty";
+      empty.textContent = "No active games need your move right now.";
+      elements.playmodeActiveList.append(empty);
+    } else {
+      for (const match of activeMatches) {
+        elements.playmodeActiveList.append(renderMatchRow(match));
+      }
+    }
+  }
   if (elements.playmodeList) {
     elements.playmodeList.replaceChildren();
     if (!(state.playmodeMatches || []).length) {
@@ -2786,20 +3315,16 @@ function renderPlaymodePage() {
       elements.playmodeList.append(empty);
     } else {
       for (const match of state.playmodeMatches) {
-        const row = document.createElement("article");
-        row.className = "builder-surface playmode-match-row";
-        row.innerHTML = `
-          <strong>${escapeHtml(match.player_one_deck_title || "Deck")} vs ${escapeHtml(match.player_two_deck_title || "Waiting for opponent")}</strong>
-          <span>${escapeHtml(match.mode)} • ${escapeHtml(match.status)} • Turn ${match.current_turn}</span>
-          <span class="playmode-match-code">Match code: <strong>${escapeHtml(match.public_id)}</strong></span>
-        `;
-        elements.playmodeList.append(row);
+        elements.playmodeList.append(renderMatchRow(match));
       }
     }
   }
   if (elements.playmodeBoardTitle) {
+    const activeName = state.playmodeMatch
+      ? playmodePlayerName(activePlaymodePlayer(), state.playmodeMatch.active_seat || 1)
+      : "";
     elements.playmodeBoardTitle.textContent = state.playmodeMatch
-      ? `Match ${state.playmodeMatch.public_id}`
+      ? `Match ${state.playmodeMatch.public_id} • ${activeName}'s turn`
       : "No active match loaded";
   }
   if (elements.playmodeBoardMeta) {
@@ -2809,6 +3334,11 @@ function renderPlaymodePage() {
   }
   if (elements.playmodeStatus && state.playmodeMatch) {
     elements.playmodeStatus.textContent = playmodeTurnStatusText();
+  }
+  if (elements.playmodeSpectateButton) {
+    const canInviteSpectator = Boolean(state.playmodeMatch?.status === "active" && state.playmodeMatch?.mode !== "computer" && (state.playmodeMatch.viewer_seat || state.playmodeMatch.admin_override));
+    elements.playmodeSpectateButton.hidden = !canInviteSpectator;
+    elements.playmodeSpectateButton.disabled = !canInviteSpectator;
   }
   if (elements.playmodeJoinPanel) {
     const canAdminSeatSelf = Boolean(
@@ -2843,6 +3373,7 @@ function renderPlaymodePage() {
   } else if (elements.playmodePhasePanel) {
     elements.playmodePhasePanel.hidden = true;
   }
+  renderPlaymodeActionOverlay();
   syncPlaymodeSoundEffects();
   schedulePlaymodePolling();
 }
@@ -3007,7 +3538,7 @@ async function loadHistoryPage() {
 
 async function openPlaytestSandbox() {
   if (totalDeckCards() === 0) {
-    setStatus("Build a deck first, then open the playtest sandbox.", "error");
+    setStatus("Build a deck first, then open Test Play mode.", "error");
     return;
   }
   await ensureDeckCardsHydratedForPlaytest();
@@ -3053,6 +3584,10 @@ function renderCardDetail(card) {
     document.title = "Paladin's Vault • Card Not Found";
     elements.cardDetailLayout.hidden = true;
     elements.cardDetailEmpty.innerHTML = `<p class="hero-text">This card could not be found. Try returning to the full card browser.</p>`;
+    if (elements.cardDetailAnimationSlot) {
+      elements.cardDetailAnimationSlot.replaceChildren();
+      elements.cardDetailAnimationSlot.hidden = true;
+    }
     return;
   }
 
@@ -3082,6 +3617,19 @@ function renderCardDetail(card) {
       chip.className = "chip";
       chip.textContent = civ;
       elements.cardDetailCivs.append(chip);
+    }
+  }
+  if (elements.cardDetailAnimationSlot) {
+    elements.cardDetailAnimationSlot.replaceChildren();
+    const animationFile = cardAnimationFile(card);
+    elements.cardDetailAnimationSlot.hidden = !animationFile;
+    if (animationFile) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "primary-button card-animation-button";
+      button.textContent = "Show Animation";
+      button.addEventListener("click", () => showCardAnimation(card));
+      elements.cardDetailAnimationSlot.append(button);
     }
   }
   if (elements.cardDetailType) {
@@ -3328,6 +3876,63 @@ function ensureAdminMenuLinks() {
   navLinks.insertBefore(topLevelLink, anchorTarget || null);
 }
 
+function closePlaymodeConstructionModal() {
+  const modal = document.querySelector("#playmode-construction-modal");
+  if (modal) {
+    modal.hidden = true;
+  }
+}
+
+function ensurePlaymodeConstructionModal() {
+  let modal = document.querySelector("#playmode-construction-modal");
+  if (modal) {
+    return modal;
+  }
+  modal = document.createElement("div");
+  modal.id = "playmode-construction-modal";
+  modal.className = "modal-shell playmode-construction-modal";
+  modal.hidden = true;
+  modal.innerHTML = `
+    <div class="modal-backdrop" data-close-playmode-construction></div>
+    <section class="panel modal-panel playmode-construction-panel" role="dialog" aria-modal="true" aria-labelledby="playmode-construction-title">
+      <div class="playmode-construction-orb" aria-hidden="true"></div>
+      <p class="section-label">Play Mode</p>
+      <h2 id="playmode-construction-title">Under Construction</h2>
+      <p class="hero-text">The duel gates are being reforged. Play Mode is paused for the public build while the full rules engine, private matches, async turns, and card abilities get battle-tested properly.</p>
+      <div class="playmode-construction-grid" aria-label="Play Mode roadmap">
+        <span>Rules engine polish</span>
+        <span>Private match flow</span>
+        <span>Async turn safety</span>
+      </div>
+      <div class="hero-actions">
+        <button type="button" class="primary-button" data-close-playmode-construction>Back to the Vault</button>
+        <a class="ghost-button" href="/builder">Keep building decks</a>
+      </div>
+    </section>
+  `;
+  document.body.append(modal);
+  for (const target of modal.querySelectorAll("[data-close-playmode-construction]")) {
+    target.addEventListener("click", closePlaymodeConstructionModal);
+  }
+  return modal;
+}
+
+function openPlaymodeConstructionModal() {
+  const modal = ensurePlaymodeConstructionModal();
+  modal.hidden = false;
+}
+
+function bindPlaymodeComingSoonLink(link) {
+  if (!link || link.dataset.playmodeComingSoonBound === "true") {
+    return;
+  }
+  link.dataset.playmodeComingSoonBound = "true";
+  link.addEventListener("click", (event) => {
+    event.preventDefault();
+    window.location.assign(playmodePagePath());
+  });
+}
+
 function ensurePlaymodeNavLink() {
   const navLinks = document.querySelector(".top-nav-links");
   if (!navLinks) {
@@ -3336,6 +3941,12 @@ function ensurePlaymodeNavLink() {
   const existing = navLinks.querySelector("[data-playmode-top-link]");
   if (existing) {
     existing.href = playmodePagePath();
+    bindPlaymodeComingSoonLink(existing);
+    const discordLink = navLinks.querySelector("[data-discord-nav-link]");
+    const anchorTarget = discordLink || navLinks.querySelector("[data-login-nav], .nav-notification-dropdown, .nav-avatar-dropdown, [data-profile-menu]");
+    if (anchorTarget && existing.nextSibling !== anchorTarget) {
+      navLinks.insertBefore(existing, anchorTarget);
+    }
     return;
   }
   const link = document.createElement("a");
@@ -3344,6 +3955,7 @@ function ensurePlaymodeNavLink() {
   link.dataset.routeLink = "playmode";
   link.dataset.playmodeTopLink = "true";
   link.textContent = "Play Mode";
+  bindPlaymodeComingSoonLink(link);
   const anchorTarget = navLinks.querySelector("[data-login-nav], .nav-notification-dropdown, .nav-avatar-dropdown, [data-profile-menu]");
   navLinks.insertBefore(link, anchorTarget || null);
   elements.routeLinks = [...document.querySelectorAll("[data-route-link]")];
@@ -3506,9 +4118,6 @@ function bindEvents() {
   elements.openPlaytestButton?.addEventListener("click", () => {
     void openPlaytestSandbox();
   });
-  elements.openAdminPlaytestButton?.addEventListener("click", () => {
-    void openPlaytestSandbox();
-  });
   elements.openPlaymodePageButton?.addEventListener("click", () => {
     window.location.assign(playmodePagePath());
   });
@@ -3530,10 +4139,17 @@ function bindEvents() {
   elements.playmodeConcedeButton?.addEventListener("click", () => {
     void concedePlaymodeMatch();
   });
+  elements.playmodeSpectateButton?.addEventListener("click", () => {
+    void openPlaymodeSpectateModal();
+  });
   elements.playmodeExitButton?.addEventListener("click", () => {
     window.location.assign(builderEditorPath());
   });
   elements.exploreTypeSelect?.addEventListener("change", handleExploreTypeChange);
+  elements.exploreDeckSortSelect?.addEventListener("change", (event) => {
+    state.exploreDeckSort = event.target.value === "recent" ? "recent" : "likes";
+    renderExploreDecks();
+  });
   elements.exploreSearchInput?.addEventListener("input", (event) => {
     state.exploreSearch = event.target.value.trim().toLowerCase();
     renderExploreDecks();
@@ -3678,6 +4294,7 @@ function bindEvents() {
   elements.windowPrintButton?.addEventListener("click", () => window.print());
   elements.createProfileButton?.addEventListener("click", createProfile);
   elements.saveProfileUsernameButton?.addEventListener("click", saveProfileUsername);
+  elements.saveProfileBioButton?.addEventListener("click", saveProfileBio);
   elements.saveProfileAvatarButton?.addEventListener("click", saveProfileAvatar);
   elements.loginButton?.addEventListener("click", loginProfile);
   for (const field of [elements.loginEmail, elements.loginPassword]) {
@@ -4107,7 +4724,7 @@ function renderWelcome() {
 function handleExploreTypeChange(event) {
   const value = event.target.value;
   if (value === "cards") {
-    window.location.href = "/cards";
+    window.location.href = "/cards?type=cards";
     return;
   }
   const next = new URL("/explore-decks", window.location.origin);
@@ -4120,7 +4737,7 @@ function renderExploreSections() {
     return;
   }
   const params = new URLSearchParams(window.location.search);
-  const value = params.get("type") || "decks";
+  const value = page === "cards" ? "cards" : (params.get("type") || "decks");
   elements.exploreTypeSelect.value = value;
   if (elements.exploreSearchInput) {
     elements.exploreSearchInput.placeholder = value === "users"
@@ -4183,17 +4800,16 @@ function renderAuthNavigation() {
     avatar.classList.add("profile-avatar-image");
   }
   ensurePlaymodeNavLink();
+  ensureDiscordNavLink();
+  ensureDiscordFooterLink();
   ensureAdminMenuLinks();
+  updateNavAuthGrouping();
   renderTestPlayAccess();
 }
 
 function renderTestPlayAccess() {
-  const isAdmin = Boolean(activeProfile()?.is_admin);
   for (const panel of elements.deckTestingPanels || []) {
     panel.hidden = false;
-  }
-  if (elements.openAdminPlaytestButton) {
-    elements.openAdminPlaytestButton.hidden = !isAdmin;
   }
 }
 
@@ -4296,6 +4912,129 @@ function ensurePlaymodeInviteModal() {
   });
 }
 
+function ensurePlaymodeSpectateModal() {
+  if (document.querySelector("#playmode-spectate-modal")) {
+    elements.playmodeSpectateModal = document.querySelector("#playmode-spectate-modal");
+    elements.playmodeSpectateList = document.querySelector("#playmode-spectate-list");
+    elements.playmodeSpectateStatus = document.querySelector("#playmode-spectate-status");
+    elements.playmodeSpectateManualInput = document.querySelector("#playmode-spectate-manual-input");
+    elements.playmodeSpectateManualButton = document.querySelector("#playmode-spectate-manual-button");
+    elements.closePlaymodeSpectateModal = document.querySelector("#close-playmode-spectate-modal");
+    elements.closePlaymodeSpectateModalTargets = [...document.querySelectorAll("[data-close-playmode-spectate-modal]")];
+    return;
+  }
+  const wrapper = document.createElement("div");
+  wrapper.innerHTML = `
+    <div id="playmode-spectate-modal" class="modal-shell" hidden>
+      <div class="modal-backdrop" data-close-playmode-spectate-modal></div>
+      <section class="panel modal-panel auth-modal-panel playmode-invite-modal-panel">
+        <div class="panel-header">
+          <div>
+            <p class="section-label">Spectate invite</p>
+            <h2>Send spectate access</h2>
+            <p class="hero-text">Invite a followed user, username, or email. Only invited viewers can open this active match.</p>
+          </div>
+          <button id="close-playmode-spectate-modal" type="button" class="ghost-button">Close</button>
+        </div>
+        <p id="playmode-spectate-status" class="hero-text">Loading followed users...</p>
+        <div id="playmode-spectate-list" class="playmode-invite-list"></div>
+        <div class="playmode-invite-manual">
+          <label class="field">
+            <span>User or email</span>
+            <input id="playmode-spectate-manual-input" type="text" placeholder="@username or email@example.com">
+          </label>
+          <button id="playmode-spectate-manual-button" type="button" class="primary-button">Send Invite</button>
+        </div>
+      </section>
+    </div>
+  `;
+  document.body.append(wrapper.firstElementChild);
+  elements.playmodeSpectateModal = document.querySelector("#playmode-spectate-modal");
+  elements.playmodeSpectateList = document.querySelector("#playmode-spectate-list");
+  elements.playmodeSpectateStatus = document.querySelector("#playmode-spectate-status");
+  elements.playmodeSpectateManualInput = document.querySelector("#playmode-spectate-manual-input");
+  elements.playmodeSpectateManualButton = document.querySelector("#playmode-spectate-manual-button");
+  elements.closePlaymodeSpectateModal = document.querySelector("#close-playmode-spectate-modal");
+  elements.closePlaymodeSpectateModalTargets = [...document.querySelectorAll("[data-close-playmode-spectate-modal]")];
+  elements.closePlaymodeSpectateModal?.addEventListener("click", closePlaymodeSpectateModal);
+  for (const target of elements.closePlaymodeSpectateModalTargets) {
+    target.addEventListener("click", closePlaymodeSpectateModal);
+  }
+  elements.playmodeSpectateManualButton?.addEventListener("click", () => {
+    void sendPlaymodeSpectateInvite(elements.playmodeSpectateManualInput?.value.trim() || "");
+  });
+}
+
+function ensurePlaymodeActionOverlay() {
+  if (elements.playmodeActionOverlay || document.querySelector("#playmode-action-overlay")) {
+    elements.playmodeActionOverlay = document.querySelector("#playmode-action-overlay");
+    return;
+  }
+  const overlay = document.createElement("div");
+  overlay.id = "playmode-action-overlay";
+  overlay.className = "playtest-action-overlay playmode-action-overlay";
+  overlay.hidden = true;
+  document.body.append(overlay);
+  elements.playmodeActionOverlay = overlay;
+}
+
+function ensurePlaymodeCardPreview() {
+  if (elements.playmodeCardPreview || document.querySelector("#playmode-card-preview")) {
+    elements.playmodeCardPreview = document.querySelector("#playmode-card-preview");
+    return;
+  }
+  const preview = document.createElement("aside");
+  preview.id = "playmode-card-preview";
+  preview.className = "playmode-card-preview";
+  preview.hidden = true;
+  document.body.append(preview);
+  elements.playmodeCardPreview = preview;
+}
+
+function positionPlaymodeCardPreview(event) {
+  const preview = elements.playmodeCardPreview;
+  if (!preview || preview.hidden) {
+    return;
+  }
+  const margin = 18;
+  const previewWidth = preview.offsetWidth || 250;
+  const previewHeight = preview.offsetHeight || 350;
+  let left = event.clientX + margin;
+  let top = event.clientY - previewHeight * 0.42;
+  if (left + previewWidth + margin > window.innerWidth) {
+    left = event.clientX - previewWidth - margin;
+  }
+  top = Math.max(margin, Math.min(window.innerHeight - previewHeight - margin, top));
+  preview.style.left = `${Math.max(margin, left)}px`;
+  preview.style.top = `${top}px`;
+}
+
+function showPlaymodeCardPreview(cardElement, event) {
+  ensurePlaymodeCardPreview();
+  const preview = elements.playmodeCardPreview;
+  if (!preview) {
+    return;
+  }
+  const image = cardElement.dataset.playmodePreviewImage || "";
+  const name = cardElement.dataset.playmodePreviewName || "Card preview";
+  if (!image) {
+    hidePlaymodeCardPreview();
+    return;
+  }
+  preview.innerHTML = `
+    <img src="${escapeHtml(image)}" alt="${escapeHtml(name)}" decoding="async">
+    <strong>${escapeHtml(name)}</strong>
+  `;
+  preview.hidden = false;
+  positionPlaymodeCardPreview(event);
+}
+
+function hidePlaymodeCardPreview() {
+  if (elements.playmodeCardPreview) {
+    elements.playmodeCardPreview.hidden = true;
+  }
+}
+
 async function openPlaymodeInviteModal() {
   ensurePlaymodeInviteModal();
   if (!state.activeProfileId) {
@@ -4374,6 +5113,89 @@ function selectPlaymodeInvite(username) {
   if (elements.playmodeInviteUsername) elements.playmodeInviteUsername.value = cleanUsername;
   if (elements.playmodeStatus) elements.playmodeStatus.textContent = `${displayUsername(cleanUsername)} selected. Create the match to send the invite.`;
   closePlaymodeInviteModal();
+}
+
+async function openPlaymodeSpectateModal() {
+  ensurePlaymodeSpectateModal();
+  if (!state.playmodeMatch || state.playmodeMatch.status !== "active") {
+    setPlaymodeStatus("Spectate invites can be sent only after the match is active.");
+    return;
+  }
+  if (!state.activeProfileId || (!state.playmodeMatch.viewer_seat && !state.playmodeMatch.admin_override)) {
+    setPlaymodeStatus("Only players in this match can invite spectators.");
+    return;
+  }
+  if (elements.playmodeSpectateModal) elements.playmodeSpectateModal.hidden = false;
+  if (elements.playmodeSpectateStatus) elements.playmodeSpectateStatus.textContent = "Loading followed users...";
+  if (elements.playmodeSpectateList) elements.playmodeSpectateList.replaceChildren();
+  try {
+    await loadPlaymodeFollowingForInvite();
+    renderPlaymodeSpectateList();
+  } catch (error) {
+    if (elements.playmodeSpectateStatus) {
+      elements.playmodeSpectateStatus.textContent = error?.message || "Could not load followed users. You can still enter a username or email manually.";
+    }
+  }
+}
+
+function closePlaymodeSpectateModal() {
+  if (elements.playmodeSpectateModal) elements.playmodeSpectateModal.hidden = true;
+}
+
+function renderPlaymodeSpectateList() {
+  if (!elements.playmodeSpectateList) return;
+  const following = state.activeProfileDetail?.following || [];
+  elements.playmodeSpectateList.replaceChildren();
+  if (elements.playmodeSpectateStatus) {
+    elements.playmodeSpectateStatus.textContent = following.length
+      ? "Choose a followed user to grant spectate access."
+      : "You are not following anyone yet. Use the manual field below.";
+  }
+  if (following.length === 0) {
+    const empty = document.createElement("p");
+    empty.className = "playmode-invite-empty";
+    empty.textContent = "Follow players from their profile, then they will appear here.";
+    elements.playmodeSpectateList.append(empty);
+    return;
+  }
+  for (const profile of following) {
+    const username = profile.username || "";
+    const row = document.createElement("article");
+    row.className = "playmode-invite-row";
+    row.innerHTML = `
+      <div class="playmode-invite-avatar" aria-hidden="true"></div>
+      <div class="playmode-invite-user">
+        <strong>${escapeHtml(displayUsername(username))}</strong>
+        <span>${profile.follower_count ?? 0} followers • ${profile.following_count ?? 0} following</span>
+      </div>
+      <button type="button" class="primary-button playmode-spectate-select">Send Spectate</button>
+    `;
+    setAvatarArt(row.querySelector(".playmode-invite-avatar"), profile.avatar_url || DEFAULT_LOGO_URL);
+    row.querySelector(".playmode-spectate-select")?.addEventListener("click", () => {
+      void sendPlaymodeSpectateInvite(username);
+    });
+    elements.playmodeSpectateList.append(row);
+  }
+}
+
+async function sendPlaymodeSpectateInvite(target) {
+  const inviteTo = String(target || "").trim();
+  if (!inviteTo) {
+    if (elements.playmodeSpectateStatus) elements.playmodeSpectateStatus.textContent = "Choose a user or enter an email address first.";
+    return;
+  }
+  if (!state.playmodeMatch || !state.activeProfileId) return;
+  try {
+    const payload = await fetchJson(`${API_BASE}/playmode/matches/${encodeURIComponent(state.playmodeMatch.public_id)}/spectate-invites`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ profile_id: state.activeProfileId, invite_to: inviteTo })
+    });
+    setPlaymodeStatus(payload.message || `Spectate invite sent to ${inviteTo}.`);
+    closePlaymodeSpectateModal();
+  } catch (error) {
+    if (elements.playmodeSpectateStatus) elements.playmodeSpectateStatus.textContent = error?.message || "Spectate invite could not be sent.";
+  }
 }
 
 function setBootLoadingState(isLoading) {
@@ -4561,6 +5383,47 @@ function ensurePlaytestLibraryModal() {
   });
 }
 
+function ensurePlaytestGraveyardModal() {
+  if (document.querySelector("#playtest-graveyard-modal")) {
+    elements.playtestGraveyardModal = document.querySelector("#playtest-graveyard-modal");
+    elements.playtestGraveyardList = document.querySelector("#playtest-graveyard-list");
+    elements.closePlaytestGraveyardModal = document.querySelector("#close-playtest-graveyard-modal");
+    elements.closePlaytestGraveyardModalTargets = [...document.querySelectorAll("[data-close-playtest-graveyard-modal]")];
+    return;
+  }
+  const wrapper = document.createElement("div");
+  wrapper.innerHTML = `
+    <div id="playtest-graveyard-modal" class="modal-shell" hidden>
+      <div class="modal-backdrop" data-close-playtest-graveyard-modal></div>
+      <section class="panel modal-panel auth-modal-panel">
+        <div class="panel-header">
+          <div>
+            <p class="section-label">Graveyard</p>
+            <h2>Choose a card to return</h2>
+          </div>
+          <button id="close-playtest-graveyard-modal" type="button" class="ghost-button">Close</button>
+        </div>
+        <p class="hero-text">Cards are shown from newest to oldest. Pick one to move it back to your hand.</p>
+        <div id="playtest-graveyard-list" class="playtest-search-results playtest-search-results-static playtest-graveyard-list"></div>
+      </section>
+    </div>
+  `;
+  document.body.append(wrapper.firstElementChild);
+  elements.playtestGraveyardModal = document.querySelector("#playtest-graveyard-modal");
+  elements.playtestGraveyardList = document.querySelector("#playtest-graveyard-list");
+  elements.closePlaytestGraveyardModal = document.querySelector("#close-playtest-graveyard-modal");
+  elements.closePlaytestGraveyardModalTargets = [...document.querySelectorAll("[data-close-playtest-graveyard-modal]")];
+  elements.closePlaytestGraveyardModal?.addEventListener("click", closePlaytestGraveyardModal);
+  for (const target of elements.closePlaytestGraveyardModalTargets) {
+    target.addEventListener("click", closePlaytestGraveyardModal);
+  }
+  elements.playtestGraveyardModal?.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      closePlaytestGraveyardModal();
+    }
+  });
+}
+
 function closeAdminMonthModal() {
   if (elements.adminMonthModal) {
     elements.adminMonthModal.hidden = true;
@@ -4725,6 +5588,8 @@ function renderProfile() {
     elements.profileAvatar.classList.add("profile-avatar-image");
     if (elements.exploreProfileCard) elements.exploreProfileCard.hidden = true;
     if (elements.profileUsernameInput) elements.profileUsernameInput.value = "";
+    if (elements.profileBioInput) elements.profileBioInput.value = "";
+    if (elements.profileBioEditorLabel) elements.profileBioEditorLabel.textContent = "Your Bio";
     return;
   }
 
@@ -4770,6 +5635,16 @@ function renderProfile() {
   }
   if (elements.saveProfileUsernameButton) {
     elements.saveProfileUsernameButton.hidden = Boolean(isPublicProfileView);
+  }
+  if (elements.profileBioInput) {
+    elements.profileBioInput.value = profile.bio || "";
+    elements.profileBioInput.disabled = Boolean(isPublicProfileView);
+  }
+  if (elements.profileBioEditorLabel) {
+    elements.profileBioEditorLabel.textContent = `${displayUsername(profile.username)}'s Bio`;
+  }
+  if (elements.saveProfileBioButton) {
+    elements.saveProfileBioButton.hidden = Boolean(isPublicProfileView);
   }
   if (elements.followingList) {
     elements.followingList.replaceChildren();
@@ -5074,6 +5949,9 @@ function renderExploreDecks() {
     return;
   }
   elements.exploreDecks.replaceChildren();
+  if (elements.exploreDeckSortSelect) {
+    elements.exploreDeckSortSelect.value = state.exploreDeckSort;
+  }
 
   const filteredDecks = state.exploreDecks.filter((deck) => {
     const haystack = `${deck.title} ${normalizedUsername(deck.owner?.username || "")}`.toLowerCase();
@@ -5085,7 +5963,8 @@ function renderExploreDecks() {
     const matchesCard = !state.exploreDeckFilters.containsCard
       || (deck.card_names || []).some((name) => name.toLowerCase().includes(state.exploreDeckFilters.containsCard));
     return matchesSearch && matchesOwner && matchesCivilization && matchesCard;
-  });
+  }).sort(compareExploreDecks);
+  const deckOfTheDay = pickDeckOfTheDay(filteredDecks);
 
   if (filteredDecks.length === 0) {
     const message = document.createElement("p");
@@ -5097,17 +5976,108 @@ function renderExploreDecks() {
     return;
   }
 
-  for (const deck of filteredDecks) {
+  const mostLikedDecks = [...filteredDecks]
+    .filter((deck) => deck.public_id !== deckOfTheDay?.public_id)
+    .sort(compareDecksByLikes)
+    .slice(0, 6);
+  const featuredDeckIds = new Set([
+    deckOfTheDay?.public_id,
+    ...mostLikedDecks.map((deck) => deck.public_id)
+  ].filter(Boolean));
+
+  const featuredShelf = buildExploreFeaturedDeckShelf(deckOfTheDay, mostLikedDecks);
+  if (featuredShelf) {
+    elements.exploreDecks.append(featuredShelf);
+  }
+
+  for (const deck of filteredDecks.filter((item) => !featuredDeckIds.has(item.public_id))) {
     elements.exploreDecks.append(buildDeckSummaryCard(deck));
   }
 }
 
-function buildDeckSummaryCard(deck) {
+function deckCreatedTimestamp(deck) {
+  const parsed = Date.parse(deck.created_at || deck.updated_at || deck.updated_at_label || "");
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function compareExploreDecks(left, right) {
+  if (state.exploreDeckSort === "recent") {
+    const dateDiff = deckCreatedTimestamp(right) - deckCreatedTimestamp(left);
+    if (dateDiff) return dateDiff;
+  } else {
+    const likeDiff = compareDecksByLikes(left, right);
+    if (likeDiff) return likeDiff;
+  }
+  return String(left.title || "").localeCompare(String(right.title || ""));
+}
+
+function compareDecksByLikes(left, right) {
+  return (right.like_count || 0) - (left.like_count || 0);
+}
+
+function buildExploreFeaturedDeckShelf(deckOfTheDay, mostLikedDecks) {
+  if (!deckOfTheDay && !mostLikedDecks.length) {
+    return null;
+  }
+  const shelf = document.createElement("section");
+  shelf.className = "explore-featured-decks";
+  if (deckOfTheDay) {
+    const dailyWrap = document.createElement("div");
+    dailyWrap.className = "explore-featured-daily";
+    dailyWrap.append(buildDeckSummaryCard(deckOfTheDay, { isDeckOfTheDay: true }));
+    shelf.append(dailyWrap);
+  }
+  if (mostLikedDecks.length) {
+    const likedPanel = document.createElement("section");
+    likedPanel.className = "most-liked-decks-panel";
+    likedPanel.innerHTML = `
+      <div class="most-liked-decks-header">
+        <p class="section-label">Most Liked Decks</p>
+        <h3>Top Crystal Likes</h3>
+      </div>
+    `;
+    const grid = document.createElement("div");
+    grid.className = "most-liked-decks-grid";
+    for (const deck of mostLikedDecks) {
+      grid.append(buildDeckSummaryCard(deck, { isMostLiked: true }));
+    }
+    likedPanel.append(grid);
+    shelf.append(likedPanel);
+  }
+  return shelf;
+}
+
+function dailyDeckSeed() {
+  const today = new Date();
+  return `${today.getFullYear()}-${today.getMonth() + 1}-${today.getDate()}`;
+}
+
+function seededDeckScore(deck, seed) {
+  const value = `${seed}:${deck.public_id || deck.id || deck.title || ""}`;
+  let hash = 0;
+  for (let index = 0; index < value.length; index += 1) {
+    hash = ((hash << 5) - hash + value.charCodeAt(index)) | 0;
+  }
+  return Math.abs(hash);
+}
+
+function pickDeckOfTheDay(decks) {
+  if (!Array.isArray(decks) || decks.length === 0) {
+    return null;
+  }
+  const seed = dailyDeckSeed();
+  return [...decks].sort((left, right) => seededDeckScore(left, seed) - seededDeckScore(right, seed))[0];
+}
+
+function buildDeckSummaryCard(deck, options = {}) {
   const article = document.createElement("article");
   article.className = "profile-deck-card";
+  article.classList.toggle("is-deck-of-day", Boolean(options.isDeckOfTheDay));
+  article.classList.toggle("is-most-liked-deck", Boolean(options.isMostLiked));
   article.style.setProperty("--deck-card-cover", deck.cover_image_url ? `url('${escapeHtml(deck.cover_image_url)}')` : "none");
   const isOwnDeck = Boolean(state.activeProfileId && deck.owner?.id === state.activeProfileId);
   article.innerHTML = `
+    ${options.isDeckOfTheDay ? '<div class="deck-of-day-badge">Deck of the Day</div>' : ""}
     <div class="profile-deck-cover" style="background-image: url('${escapeHtml(deck.cover_image_url || DEFAULT_LOGO_URL)}')"></div>
     <strong>${escapeHtml(deck.title)}</strong>
     <span>${deck.card_total} cards • ${deck.updated_at_label}</span>
@@ -5210,6 +6180,11 @@ function renderExploreUsers() {
     .filter((profile) => {
       if (!state.exploreSearch) return true;
       return normalizedUsername(profile.username).includes(state.exploreSearch);
+    })
+    .sort((left, right) => {
+      const followerDiff = (right.follower_count || 0) - (left.follower_count || 0);
+      if (followerDiff) return followerDiff;
+      return displayUsername(left.username).localeCompare(displayUsername(right.username));
     });
   if (others.length === 0) {
     const message = document.createElement("p");
@@ -5221,35 +6196,102 @@ function renderExploreUsers() {
     return;
   }
 
-  for (const profile of others) {
-    const card = document.createElement("article");
-    card.className = "profile-deck-card";
-    card.innerHTML = `
-      <div class="profile-user-avatar"></div>
-      <strong>${escapeHtml(displayUsername(profile.username))}</strong>
-      <span>${profile.follower_count ?? 0} followers • ${profile.following_count ?? 0} following</span>
-    `;
-    setAvatarArt(card.querySelector(".profile-user-avatar"), profile.avatar_url || DEFAULT_LOGO_URL);
-    const actions = document.createElement("div");
-    actions.className = "hero-actions";
-    const viewButton = document.createElement("a");
-    viewButton.className = "ghost-button";
-    viewButton.href = `/profile?user=${encodeURIComponent(profile.username)}`;
-    viewButton.textContent = "Open Profile";
-    actions.append(viewButton);
-    if (ownProfile) {
-      const followButton = document.createElement("button");
-      followButton.type = "button";
-      followButton.className = "primary-button";
-      applyFollowButtonState(followButton, profile.id);
-      followButton.addEventListener("click", async () => {
-        await toggleFollowProfile(profile.id);
-      });
-      actions.append(followButton);
-    }
-    card.append(actions);
-    elements.exploreUsers.append(card);
+  const duelistOfTheDay = pickDuelistOfTheDay(others);
+  const mostFollowedUsers = others.filter((profile) => profile.id !== duelistOfTheDay?.id).slice(0, 7);
+  const featuredUserIds = new Set([
+    duelistOfTheDay?.id,
+    ...mostFollowedUsers.map((profile) => profile.id)
+  ].filter(Boolean));
+  const featuredPanel = buildExploreFeaturedUsersShelf(duelistOfTheDay, mostFollowedUsers);
+  if (featuredPanel) {
+    elements.exploreUsers.append(featuredPanel);
   }
+
+  for (const profile of others.filter((item) => !featuredUserIds.has(item.id))) {
+    elements.exploreUsers.append(buildExploreUserCard(profile));
+  }
+}
+
+function buildExploreFeaturedUsersShelf(duelistOfTheDay, mostFollowedUsers) {
+  if (!duelistOfTheDay && !mostFollowedUsers.length) {
+    return null;
+  }
+  const shelf = document.createElement("section");
+  shelf.className = "explore-featured-decks explore-featured-users";
+  if (duelistOfTheDay) {
+    const dailyWrap = document.createElement("div");
+    dailyWrap.className = "explore-featured-daily";
+    dailyWrap.append(buildExploreUserCard(duelistOfTheDay, { isDuelistOfTheDay: true }));
+    shelf.append(dailyWrap);
+  }
+  const panel = buildMostFollowedUsersPanel(mostFollowedUsers);
+  if (panel) {
+    shelf.append(panel);
+  }
+  return shelf;
+}
+
+function buildMostFollowedUsersPanel(profiles) {
+  if (!profiles.length) {
+    return null;
+  }
+  const panel = document.createElement("section");
+  panel.className = "most-liked-decks-panel most-followed-users-panel";
+  panel.innerHTML = `
+    <div class="most-liked-decks-header">
+      <p class="section-label">Most Followed Users</p>
+      <h3>Top Followers</h3>
+    </div>
+  `;
+  const grid = document.createElement("div");
+  grid.className = "most-liked-decks-grid most-followed-users-grid";
+  for (const profile of profiles) {
+    grid.append(buildExploreUserCard(profile, { isMostFollowed: true }));
+  }
+  panel.append(grid);
+  return panel;
+}
+
+function buildExploreUserCard(profile, options = {}) {
+  const ownProfile = activeProfile();
+  const card = document.createElement("article");
+  card.className = "profile-deck-card";
+  card.classList.toggle("is-most-followed-user", Boolean(options.isMostFollowed));
+  card.classList.toggle("is-duelist-of-day", Boolean(options.isDuelistOfTheDay));
+  card.innerHTML = `
+    ${options.isDuelistOfTheDay ? '<div class="deck-of-day-badge duelist-of-day-badge">Duelist of the Day</div>' : ""}
+    <div class="profile-user-avatar"></div>
+    <strong>${escapeHtml(displayUsername(profile.username))}</strong>
+    <span>${profile.follower_count ?? 0} followers • ${profile.following_count ?? 0} following</span>
+  `;
+  setAvatarArt(card.querySelector(".profile-user-avatar"), profile.avatar_url || DEFAULT_LOGO_URL);
+  const actions = document.createElement("div");
+  actions.className = "hero-actions";
+  const viewButton = document.createElement("a");
+  viewButton.className = "ghost-button";
+  viewButton.href = `/profile?user=${encodeURIComponent(profile.username)}`;
+  viewButton.textContent = "Open Profile";
+  actions.append(viewButton);
+  if (ownProfile) {
+    const followButton = document.createElement("button");
+    followButton.type = "button";
+    followButton.className = "primary-button";
+    applyFollowButtonState(followButton, profile.id);
+    followButton.addEventListener("click", async () => {
+      await toggleFollowProfile(profile.id);
+    });
+    actions.append(followButton);
+  }
+  card.append(actions);
+  return card;
+}
+
+function pickDuelistOfTheDay(profiles) {
+  if (!Array.isArray(profiles) || profiles.length === 0) {
+    return null;
+  }
+  const seed = dailyDeckSeed();
+  return [...profiles].sort((left, right) => seededDeckScore(left, seed) - seededDeckScore(right, seed))[0];
 }
 
 function renderAvatarPresetChoosers() {
@@ -5269,9 +6311,41 @@ function renderAvatarPreview(container, input) {
   container.append(preview);
 }
 
+function activeAvatarPickerInput() {
+  return state.avatarPickerTarget === "profile" ? elements.profileAvatarUrlInput : elements.registerAvatarUrl;
+}
+
+function updateAvatarPresetSelectionStates(value) {
+  for (const button of document.querySelectorAll(".avatar-preset-card")) {
+    button.classList.toggle("is-selected", button.dataset.avatarValue === value);
+  }
+}
+
+function previewAvatarPresetSelection(avatarValue) {
+  const input = activeAvatarPickerInput();
+  if (!input) {
+    return;
+  }
+  input.value = avatarValue || "";
+  updateAvatarPresetSelectionStates(input.value);
+  renderAvatarPreview(
+    state.avatarPickerTarget === "profile" ? elements.profileAvatarPreview : elements.registerAvatarPreview,
+    input
+  );
+}
+
+async function confirmAvatarPresetSelection(avatarValue) {
+  previewAvatarPresetSelection(avatarValue);
+  if (state.avatarPickerTarget === "profile" && state.activeProfileId) {
+    applyLocalAvatarUpdate(avatarValue || null);
+    await saveProfileAvatar(avatarValue || null, { silent: true });
+  }
+  closeAvatarPickerModal();
+}
+
 function renderAvatarPickerBrowser() {
   const container = elements.avatarPickerBrowser;
-  const input = state.avatarPickerTarget === "profile" ? elements.profileAvatarUrlInput : elements.registerAvatarUrl;
+  const input = activeAvatarPickerInput();
   if (!container || !input) {
     return;
   }
@@ -5298,24 +6372,21 @@ function renderAvatarPickerBrowser() {
       button.type = "button";
       button.className = "avatar-preset-card";
       const avatarValue = buildAvatarPresetValue(card, name);
+      button.dataset.avatarValue = avatarValue || "";
       button.classList.toggle("is-selected", input.value === avatarValue);
       button.style.setProperty("--avatar-accent", avatarCivilizationAccent(civilization));
       button.innerHTML = `
+        <span class="avatar-in-use-badge">In Use</span>
         <div class="avatar-preset-art"></div>
         <small>${escapeHtml(card.name)}</small>
       `;
       setAvatarArt(button.querySelector(".avatar-preset-art"), avatarValue || DEFAULT_LOGO_URL);
-      button.addEventListener("click", async () => {
-        input.value = avatarValue || "";
-        if (state.avatarPickerTarget === "profile" && state.activeProfileId) {
-          applyLocalAvatarUpdate(avatarValue || null);
-        } else {
-          renderAvatarPresetChoosers();
-        }
-        if (state.avatarPickerTarget === "profile" && state.activeProfileId) {
-          await saveProfileAvatar(avatarValue || null, { silent: true });
-        }
-        closeAvatarPickerModal();
+      button.addEventListener("click", () => {
+        previewAvatarPresetSelection(avatarValue || "");
+      });
+      button.addEventListener("dblclick", async (event) => {
+        event.preventDefault();
+        await confirmAvatarPresetSelection(avatarValue || "");
       });
       grid.append(button);
     }
@@ -6627,6 +7698,11 @@ function renderBuilder() {
     rowName.textContent = entry.card.name;
     rowMeta.textContent = `${entry.card.civilizations.join(" / ")} • ${entry.card.type} • ${entry.card.cost} mana`;
     rowCount.textContent = `x${entry.count}`;
+    if (entry.count > 4) {
+      row.classList.add("has-copy-warning");
+      const warning = buildDeckCopyWarning();
+      row.querySelector(".deck-row-main")?.prepend(warning);
+    }
     row.classList.add("is-clickable");
     row.tabIndex = 0;
     row.setAttribute("role", "link");
@@ -6657,11 +7733,84 @@ function renderBuilder() {
   renderManaCurve(entries);
 }
 
+function seededCardScore(card, seed) {
+  const value = `${seed}:card:${card.id || card.name || ""}`;
+  let hash = 0;
+  for (let index = 0; index < value.length; index += 1) {
+    hash = ((hash << 5) - hash + value.charCodeAt(index)) | 0;
+  }
+  return Math.abs(hash);
+}
+
+function pickCardOfTheDay(cards) {
+  if (!Array.isArray(cards) || cards.length === 0) {
+    return null;
+  }
+  const seed = dailyDeckSeed();
+  return [...cards].sort((left, right) => seededCardScore(left, seed) - seededCardScore(right, seed))[0];
+}
+
+function renderCardOfTheDay() {
+  if (!elements.cardOfDayPanel || !elements.cardOfDayCard) {
+    return;
+  }
+  const sourceCards = state.allCards.length ? state.allCards : state.cards;
+  const card = pickCardOfTheDay(sourceCards);
+  elements.cardOfDayCard.replaceChildren();
+  elements.cardOfDayPanel.hidden = !card;
+  if (!card) {
+    return;
+  }
+
+  const article = document.createElement("article");
+  article.className = "card-of-day-card";
+  article.tabIndex = 0;
+  article.setAttribute("role", "link");
+  article.setAttribute("aria-label", `Open ${card.name} card details`);
+  const imageUrl = card.image_path || card.illustration_path || DEFAULT_LOGO_URL;
+  const civilizationLabel = (card.civilizations || []).join(" / ") || "Unknown civilization";
+  const animationFile = cardAnimationFile(card);
+  article.innerHTML = `
+    <div class="card-of-day-art">
+      <img src="${escapeHtml(imageUrl)}" alt="${escapeHtml(card.name)}" loading="lazy" decoding="async">
+    </div>
+    <div class="card-of-day-copy">
+      <div class="deck-of-day-badge card-of-day-badge">Card of the Day</div>
+      <p class="section-label">${escapeHtml(civilizationLabel)} • ${escapeHtml(String(card.cost ?? "-"))} mana</p>
+      <h3>${escapeHtml(card.name)}</h3>
+      <p class="card-of-day-type">${escapeHtml(`${card.type || "Card"}${card.race_label ? ` • ${card.race_label}` : ""}`)}</p>
+      <p class="card-of-day-rules">${escapeHtml(card.text || "No ability text available.")}</p>
+      <div class="hero-actions card-of-day-actions">
+        <button type="button" class="primary-button" data-card-of-day-open>Open Card</button>
+        ${animationFile ? '<button type="button" class="ghost-button" data-card-of-day-animation>Show Animation</button>' : ""}
+      </div>
+    </div>
+  `;
+  const open = () => openCardDetail(card);
+  article.addEventListener("click", open);
+  article.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      open();
+    }
+  });
+  article.querySelector("[data-card-of-day-open]")?.addEventListener("click", (event) => {
+    event.stopPropagation();
+    openCardDetail(card);
+  });
+  article.querySelector("[data-card-of-day-animation]")?.addEventListener("click", (event) => {
+    event.stopPropagation();
+    showCardAnimation(card);
+  });
+  elements.cardOfDayCard.append(article);
+}
+
 function renderCards() {
   if (!elements.catalogGrid || !elements.cardTemplate) {
     return;
   }
   elements.catalogGrid.replaceChildren();
+  renderCardOfTheDay();
   renderSelectedSearchCard();
   renderSearchSuggestions();
 
@@ -6885,6 +8034,9 @@ function renderDeckHistory() {
 function buildDeckImageCard(entry) {
   const article = document.createElement("article");
   article.className = "deck-image-card";
+  if (entry.count > 4) {
+    article.classList.add("has-copy-warning");
+  }
   article.classList.add("is-clickable");
   article.tabIndex = 0;
   article.setAttribute("role", "link");
@@ -6912,6 +8064,7 @@ function buildDeckImageCard(entry) {
   const quantity = document.createElement("span");
   quantity.className = "deck-image-quantity";
   quantity.textContent = `x${entry.count}`;
+  const copyWarning = entry.count > 4 ? buildDeckCopyWarning() : null;
 
   const meta = document.createElement("div");
   meta.className = "deck-image-meta";
@@ -6945,8 +8098,27 @@ function buildDeckImageCard(entry) {
   });
 
   actions.append(decrement, increment);
-  article.append(art, quantity, meta, actions);
+  article.append(...[copyWarning, art, quantity, meta, actions].filter(Boolean));
   return article;
+}
+
+function buildDeckCopyWarning() {
+  const warning = document.createElement("div");
+  warning.className = "deck-copy-warning";
+  warning.setAttribute("role", "note");
+  warning.setAttribute("aria-label", "Only 4 copy is legal");
+
+  const icon = document.createElement("span");
+  icon.className = "deck-copy-warning-icon";
+  icon.textContent = "!";
+  icon.setAttribute("aria-hidden", "true");
+
+  const label = document.createElement("span");
+  label.className = "deck-copy-warning-text";
+  label.textContent = "Only 4 copy is legal";
+
+  warning.append(icon, label);
+  return warning;
 }
 
 function renderCivilizationBreakdown(entries) {
@@ -7562,6 +8734,34 @@ async function saveProfileUsername() {
     setStatus(`Username updated to ${displayUsername(payload.username)}.`, "success");
   } catch (error) {
     setStatus(error.message || "Username update failed.", "error");
+  }
+}
+
+async function saveProfileBio() {
+  if (!state.activeProfileId) {
+    setStatus("Log in first to update your bio.", "error");
+    return;
+  }
+  const bio = elements.profileBioInput?.value.trim() ?? "";
+  try {
+    const payload = await fetchJson(`${API_BASE}/profiles/${state.activeProfileId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ bio })
+    });
+    state.profiles = state.profiles.map((profile) => profile.id === payload.id ? payload : profile);
+    state.activeProfileDetail = state.activeProfileDetail?.id === payload.id
+      ? { ...state.activeProfileDetail, bio: payload.bio || "" }
+      : state.activeProfileDetail;
+    if (state.viewedProfile?.id === payload.id) {
+      state.viewedProfile = { ...state.viewedProfile, bio: payload.bio || "" };
+    }
+    persistActiveProfileCache();
+    renderProfile();
+    renderExploreUsers();
+    setStatus("Bio saved. Other duelists can now read it on your public profile.", "success");
+  } catch (error) {
+    setStatus(error.message || "Bio update failed.", "error");
   }
 }
 

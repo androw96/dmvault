@@ -3,119 +3,69 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Paladin's Vault • Playmode</title>
+  <title>Paladin's Vault • Play Mode Coming Soon</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=Cormorant+Garamond:wght@600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="./styles.css?v=20260525d">
+  <link rel="stylesheet" href="./styles.css?v=20260603cardofday">
 </head>
 <body data-page="playmode">
   <div class="page-shell">
+    <nav class="panel top-nav" aria-label="Primary">
+      <a class="menu-logo-link" href="/" aria-label="Paladin's Vault home">
+        <img class="menu-logo menu-logo-full" src="./assets/crystal-vault-logo.png" alt="Paladin's Vault logo">
+      </a>
+      <div class="top-nav-links">
+        <a class="nav-link" data-route-link="builder" href="/builder">Deck Builder</a>
+        <details class="nav-dropdown nav-explore-dropdown">
+          <summary class="nav-link" data-route-link="explore">Explore</summary>
+          <div class="nav-dropdown-menu explore-dropdown-menu">
+            <a class="nav-link nav-dropdown-link" href="/explore-decks?type=decks">Decks</a>
+            <a class="nav-link nav-dropdown-link" href="/explore-decks?type=users">Users</a>
+            <a class="nav-link nav-dropdown-link" href="/cards">Cards</a>
+          </div>
+        </details>
+        <a class="nav-link is-active" data-playmode-top-link href="/playmode">Play Mode</a>
+        <a class="nav-link nav-login-link" data-login-nav href="#">Login</a>
+        <a class="nav-link" data-signup-nav href="#">Sign Up</a>
+        <details class="nav-dropdown nav-avatar-dropdown" data-profile-menu hidden>
+          <summary class="nav-avatar-trigger" aria-label="Open profile menu">
+            <span class="nav-avatar" data-nav-avatar>PV</span>
+          </summary>
+          <div class="nav-dropdown-menu profile-dropdown-menu">
+            <a class="nav-link nav-dropdown-link" href="/profile">Profile Settings</a>
+            <a class="nav-link nav-dropdown-link" href="/profile#my-decks">My Decks</a>
+            <a class="nav-link nav-dropdown-link" href="/profile">My Profile</a>
+          </div>
+        </details>
+        <a class="nav-link nav-link-danger nav-logout-link" data-logout-nav href="#">Logout</a>
+      </div>
+    </nav>
+
     <main class="page-stack">
-      <section class="panel page-hero">
-        <p class="section-label">Playmode</p>
+      <section class="panel page-hero playmode-hero-panel">
+        <p class="section-label">Play Mode</p>
         <h1>Head-to-head Duel Masters</h1>
-        <p class="hero-text">Choose one of your own saved decks, create a live or 24-hour asynchronous match, and keep both boards visible at the same time.</p>
-        <p class="hero-text" data-status id="playmode-status"></p>
+        <p class="hero-text" data-status id="playmode-status">Coming Soon: Play Mode is under construction while we finish the rules engine.</p>
       </section>
 
-      <section id="playmode-denied" class="panel" hidden>
-        <p class="hero-text">Log in first to create or join Playmode matches. Only your own saved decks can be used here.</p>
-      </section>
-
-      <section id="playmode-panel" class="page-stack" hidden>
-        <section class="panel playmode-control-grid">
-          <div class="builder-surface playmode-create-panel">
-            <p class="section-label">Create Match</p>
-            <div class="create-profile-grid">
-              <label class="field">
-                <span>Your deck</span>
-                <select id="playmode-deck-select"></select>
-              </label>
-              <label class="field">
-                <span>Mode</span>
-                <select id="playmode-mode-select">
-                  <option value="live">Live</option>
-                  <option value="async">24h async</option>
-                </select>
-              </label>
-              <label class="field">
-                <span>Private invite</span>
-                <div class="playmode-invite-field">
-                  <input id="playmode-invite-username" type="text" placeholder="No friend selected" readonly>
-                  <button id="playmode-open-invite-modal" type="button" class="ghost-button">Invite Friend</button>
-                </div>
-              </label>
-              <button id="playmode-create-button" type="button" class="primary-button">Create Playmode Match</button>
-            </div>
-          </div>
-
-          <div class="builder-surface playmode-open-panel">
-            <p class="section-label">Open Match</p>
-            <div class="create-profile-grid">
-              <label class="field">
-                <span>Match code</span>
-                <input id="playmode-open-code" type="text" placeholder="Paste a public match code">
-              </label>
-              <button id="playmode-open-button" type="button" class="ghost-button">Open Match</button>
-            </div>
-            <div id="playmode-join-panel" class="create-profile-grid" hidden>
-              <label class="field">
-                <span>Your deck for this match</span>
-                <select id="playmode-join-deck-select"></select>
-              </label>
-              <button id="playmode-join-button" type="button" class="primary-button">Join Match</button>
-            </div>
-          </div>
-        </section>
-
-        <section class="panel playmode-match-list-panel">
-          <div class="panel-header">
-            <div>
-              <p class="section-label">Your Matches</p>
-              <h2>Continue an ongoing duel</h2>
-            </div>
-          </div>
-          <div id="playmode-list" class="playmode-list"></div>
-        </section>
-
-        <section id="playmode-board" class="panel playmode-board-panel" hidden>
-          <button id="playmode-exit-button" type="button" class="danger-button playmode-exit-fixed">Exit</button>
-          <div class="panel-header">
-            <div>
-              <p class="section-label">Match Board</p>
-              <h2 id="playmode-board-title">No match loaded</h2>
-            </div>
-            <div class="playmode-board-header-actions">
-              <p id="playmode-board-meta" class="hero-text">Open a match to view both boards.</p>
-            </div>
-          </div>
-          <section id="playmode-phase-panel" class="builder-surface playmode-phase-panel" hidden>
-            <div class="playmode-phase-head">
-              <div>
-                <p class="section-label">Turn Flow</p>
-                <h3 id="playmode-phase-title">Untap</h3>
-              </div>
-              <p id="playmode-phase-copy" class="hero-text">Follow the official phase order and pass the turn with End Turn.</p>
-            </div>
-            <div id="playmode-phase-track" class="playmode-phase-track"></div>
-            <div class="playmode-phase-actions">
-              <button id="playmode-phase-advance-button" type="button" class="primary-button">Advance Phase</button>
-              <button id="playmode-concede-button" type="button" class="danger-button">Concede</button>
-            </div>
-          </section>
-          <div class="playmode-board-grid">
-            <section class="builder-surface playmode-seat-panel">
-              <div id="playmode-player-one"></div>
-            </section>
-            <section class="builder-surface playmode-seat-panel">
-              <div id="playmode-player-two"></div>
-            </section>
-          </div>
-        </section>
+      <section id="playmode-construction-page" class="panel playmode-construction-page">
+        <div class="playmode-construction-orb" aria-hidden="true"></div>
+        <p class="section-label">Coming Soon</p>
+        <h2>Under Construction</h2>
+        <p class="hero-text">Online Play Mode is being refined behind the vault doors. Test Play mode and deck building remain available while the full Duel Masters rules flow gets finished properly.</p>
+        <div class="playmode-construction-grid">
+          <span>Rules engine</span>
+          <span>Private matches</span>
+          <span>Async turns</span>
+        </div>
+        <div class="hero-actions">
+          <a class="primary-button" href="/builder">Build decks</a>
+          <a class="ghost-button" href="/">Back home</a>
+        </div>
       </section>
     </main>
   </div>
-  <script src="./app.js?v=20260525d"></script>
+  <script src="./app.js?v=20260603cardofday"></script>
 </body>
 </html>

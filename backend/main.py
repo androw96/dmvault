@@ -27,7 +27,7 @@ from .database import BASE_DIR, SessionLocal
 from .image_service import ensure_card_image
 from .models import AdminAuditLog, Card, ContactMessage, Deck, DeckItem, DeckLike, DeckRevision, EmailVerificationToken, Notification, PlayMatch, Profile, ProfileFollow
 from .pdf_service import build_deck_pdf
-from .rules_engine import build_rules_coverage
+from .rules_engine import build_creature_coverage, build_rules_coverage, build_spell_coverage
 from .schemas import (
     AdminBanIn,
     AdminEmailIn,
@@ -68,6 +68,7 @@ from .schemas import (
     PlaymodeMatchUpdateIn,
     PlaymodeMatchViewOut,
     PlaymodePlayerViewOut,
+    PlaymodeSpectateInviteIn,
     PlaymodeZoneViewOut,
     ProfileCreateIn,
     ProfileDeleteIn,
@@ -100,7 +101,7 @@ RATE_LIMIT_BUCKETS: dict[str, list[float]] = {}
 RATE_LIMIT_MAX_BUCKETS = int(os.getenv("RATE_LIMIT_MAX_BUCKETS", "5000"))
 RATE_LIMIT_PRUNE_INTERVAL_SECONDS = int(os.getenv("RATE_LIMIT_PRUNE_INTERVAL_SECONDS", "60"))
 RATE_LIMIT_LAST_PRUNE = 0.0
-ASSET_VERSION = "20260526playmodemana"
+ASSET_VERSION = "20260603cardofday"
 PDF_GENERATION_SEMAPHORE = threading.Semaphore(int(os.getenv("PDF_MAX_CONCURRENCY", "1")))
 LAST_EMAIL_ERROR: str | None = None
 RATE_LIMIT_RULES = {
@@ -687,6 +688,8 @@ def deck_summary_out(
         card_names=card_names,
         card_total=sum(entry.quantity for entry in deck.items),
         updated_at_label=deck.updated_at.strftime("%Y-%m-%d"),
+        updated_at=deck.updated_at.isoformat() if deck.updated_at else None,
+        created_at=deck.created_at.isoformat() if deck.created_at else None,
         owner=profile_to_out(owner_profile, include_email=include_owner_email, viewer_profile_id=viewer_profile_id),
         share_url=f"/share/{deck.public_id}",
         like_count=len(deck.likes),
@@ -805,11 +808,21 @@ def playmode_invite_allows(payload: dict, profile_id: int | None, *, match: Play
     if admin_override:
         return True
     if not profile_id:
-        return not payload.get("private_invite")
+        return False
     if profile_id in {match.player_one_profile_id, match.player_two_profile_id}:
         return True
     invited_profile_id = payload.get("invited_profile_id")
     return bool(payload.get("private_invite") and invited_profile_id == profile_id)
+
+
+def playmode_spectator_allows(payload: dict, profile: Profile | None, *, match: PlayMatch) -> bool:
+    if not profile or match.status != "active":
+        return False
+    spectator_ids = {int(value) for value in payload.get("spectator_profile_ids", []) if str(value).isdigit()}
+    if profile.id in spectator_ids:
+        return True
+    spectator_emails = {normalize_email(value) for value in payload.get("spectator_emails", []) if value}
+    return bool(profile.email and normalize_email(profile.email) in spectator_emails)
 
 
 def find_invited_profile(db: Session, value: str) -> Profile | None:
@@ -827,6 +840,34 @@ def find_invited_profile(db: Session, value: str) -> Profile | None:
     if "@" in raw:
         criteria.append(func.lower(Profile.email) == normalized_email)
     return db.scalars(select(Profile).where(or_(*criteria)).limit(1)).first()
+
+
+def build_playmode_spectate_message(*, recipient_email: str, recipient_name: str, actor: Profile, match: PlayMatch) -> EmailMessage:
+    match_url = f"{APP_BASE_URL}/playmode?match={match.public_id}"
+    subject = "You were invited to spectate a Paladin's Vault match"
+    message = EmailMessage()
+    message["Subject"] = subject
+    message["From"] = f"Paladin's Vault <{SMTP_FROM_EMAIL}>"
+    message["To"] = recipient_email
+    message.set_content(
+        f"""Hello {recipient_name},
+
+{actor.username} invited you to spectate a Duel Masters Playmode match on Paladin's Vault.
+
+Open the match:
+{match_url}
+"""
+    )
+    body_html = f"""
+      <p style="margin:0 0 14px;font-size:15px;line-height:1.75;color:#d7e5ff;">Hello <strong>{recipient_name}</strong>,</p>
+      <p style="margin:0 0 16px;font-size:15px;line-height:1.75;color:#d7e5ff;"><strong>{actor.username}</strong> invited you to spectate a Duel Masters Playmode match.</p>
+      <div style="text-align:center;margin:24px 0 20px;">
+        <a href="{match_url}" style="display:inline-block;padding:14px 22px;border-radius:14px;background:linear-gradient(135deg,#7ce7ff,#9fcbff);color:#081018;text-decoration:none;font-weight:800;letter-spacing:0.04em;">Spectate Match</a>
+      </div>
+      <p style="margin:0;font-size:13px;line-height:1.7;color:#9fb2d5;">You can view this match only while it is active and only from the invited account/email.</p>
+    """
+    message.add_alternative(build_email_shell(eyebrow="Playmode Spectate", title=subject, intro="A live duel is waiting in the vault.", body_html=body_html, footer_html="You are receiving this because a Paladin's Vault player invited you to spectate."), subtype="html")
+    return message
 
 
 def build_playmode_stack_for_deck(deck: Deck) -> list[dict]:
@@ -864,6 +905,7 @@ def build_playmode_player_state(deck: Deck) -> dict:
         "graveyard": [],
         "turn": 1,
         "ready": True,
+        "chargedThisTurn": False,
     }
 
 
@@ -872,8 +914,11 @@ def build_playmode_match_state(deck_one: Deck, deck_two: Deck | None = None, *, 
     return {
         "current_turn": 1,
         "active_seat": active_seat,
+        "starting_seat": active_seat,
+        "first_draw_skipped": False,
         "current_phase": "untap",
         "winner_seat": None,
+        "event_log": [f"Match started. Player {active_seat} begins on Untap."],
         "player_one": build_playmode_player_state(deck_one),
         "player_two": build_playmode_player_state(deck_two) if deck_two else {
             "drawPile": [],
@@ -899,6 +944,23 @@ def playmode_seat_key(seat: int) -> str:
 
 def playmode_opponent_seat(seat: int) -> int:
     return 1 if seat == 2 else 2
+
+
+def playmode_append_event(state_payload: dict, message: str | None) -> None:
+    if not message:
+        return
+    active_seat = int(state_payload.get("active_seat") or 1)
+    turn = int(state_payload.get("current_turn") or 1)
+    phase = str(state_payload.get("current_phase") or "untap").title()
+    entry = f"T{turn} • P{active_seat} • {phase}: {message}"
+    event_log = list(state_payload.get("event_log") or [])
+    event_log.append(entry)
+    state_payload["event_log"] = event_log[-80:]
+
+
+def playmode_append_events(state_payload: dict, messages: list[str]) -> None:
+    for message in messages:
+        playmode_append_event(state_payload, message)
 
 
 def playmode_card_civilizations(card: dict) -> list[str]:
@@ -935,13 +997,68 @@ def playmode_power_value(card: dict) -> int:
     return int(match.group(0)) if match else 0
 
 
-def playmode_breaker_count(card: dict) -> int:
+def playmode_entry_power_value(entry: dict, *, attacking: bool = False) -> int:
+    card = entry.get("card") or {}
+    power = playmode_power_value(card) + int(entry.get("temporaryPower") or 0)
+    if attacking:
+        match = re.search(r"\bpower\s+attacker\s*\+(\d+)", str(card.get("text") or ""), re.I)
+        if match:
+            power += int(match.group(1))
+    return power
+
+
+def playmode_entry_has_slayer(entry: dict) -> bool:
+    return bool(entry.get("temporarySlayer")) or playmode_has_keyword(entry.get("card") or {}, "slayer")
+
+
+def playmode_can_attack_untapped(entry: dict) -> bool:
+    card = entry.get("card") or {}
+    return bool(entry.get("temporaryCanAttackUntapped")) or bool(re.search(r"\bcan attack untapped creatures\b", str(card.get("text") or ""), re.I))
+
+
+def playmode_can_attack_players(entry: dict, defender_state: dict | None = None) -> bool:
+    text = str((entry.get("card") or {}).get("text") or "")
+    if re.search(r"\bcan(?:not|'t)\s+attack players\b", text, re.I):
+        return False
+    if re.search(r"\bwhile your opponent has no shields,\s*this creature can(?:not|'t)\s+attack\b", text, re.I) and not (defender_state or {}).get("shields"):
+        return False
+    return True
+
+
+def playmode_can_be_attacked(entry: dict, attacker: dict | None = None) -> bool:
+    text = str((entry.get("card") or {}).get("text") or "")
+    if re.search(r"\bthis creature can(?:not|'t)\s+be attacked\b", text, re.I):
+        return False
+    if attacker and re.search(r"\bcan(?:not|'t)\s+be attacked by any creature that has dragon in its race\b", text, re.I):
+        return "dragon" not in str(((attacker or {}).get("card") or {}).get("race_label") or "").lower()
+    return True
+
+
+def playmode_entry_unblockable(entry: dict, target_kind: str | None = None) -> bool:
+    if entry.get("temporaryUnblockable"):
+        return True
+    text = str((entry.get("card") or {}).get("text") or "")
+    if re.search(r"\bcan(?:not|'t)\s+be\s+blocked\b", text, re.I):
+        return True
+    if target_kind == "creature" and re.search(r"\bcan(?:not|'t)\s+be\s+blocked while attacking (?:a|another)?\s*creature\b", text, re.I):
+        return True
+    return False
+
+
+def playmode_breaker_count(card: dict, entry: dict | None = None) -> int:
     text = str(card.get("text") or "").lower()
+    temporary_breaker = int((entry or {}).get("temporaryBreaker") or 0)
     if "triple breaker" in text:
-        return 3
+        return max(temporary_breaker, 3)
     if "double breaker" in text:
-        return 2
-    return 1
+        return max(temporary_breaker, 2)
+    return max(temporary_breaker, 1)
+
+
+def playmode_clear_temporary_effects(player_state: dict) -> None:
+    for entry in player_state.get("battle") or []:
+        for key in ("temporaryPower", "temporaryBreaker", "temporaryUnblockable", "temporaryCanAttackUntapped", "temporarySlayer", "temporaryBlocker", "temporaryMustAttack", "temporaryAttackable", "temporaryUntapOnWin"):
+            entry.pop(key, None)
 
 
 def playmode_stack_entries(entry: dict) -> list[dict]:
@@ -980,6 +1097,136 @@ def playmode_top_to_shield(player_state: dict) -> dict | None:
     card = draw_pile.pop(0)
     moved = {**card, "faceDown": True, "tapped": False, "manaProduced": []}
     player_state.setdefault("shields", []).append(moved)
+    return moved
+
+
+def playmode_move_zone_entries(player_state: dict, source: str, target: str, *, amount: int | None = None, predicate=None, face_down: bool = False, tapped: bool = False) -> list[str]:
+    moved_names: list[str] = []
+    source_zone = player_state.get(source) or []
+    kept: list[dict] = []
+    moved_count = 0
+    for entry in source_zone:
+        if amount is not None and moved_count >= amount:
+            kept.append(entry)
+            continue
+        card = entry.get("card") or {}
+        if predicate and not predicate(card, entry):
+            kept.append(entry)
+            continue
+        moved_count += 1
+        moved_names.append(card.get("name") or "a card")
+        for stack_entry in playmode_stack_entries(entry):
+            player_state.setdefault(target, []).append({
+                **stack_entry,
+                "faceDown": face_down,
+                "tapped": tapped or (target == "mana" and len(playmode_card_civilizations(stack_entry.get("card") or {})) > 1),
+                "manaProduced": [],
+            })
+    player_state[source] = kept
+    return moved_names
+
+
+def playmode_move_top_cards(player_state: dict, target: str, amount: int, *, face_down: bool = False, tapped: bool = False) -> list[str]:
+    moved_names: list[str] = []
+    for _ in range(max(0, amount)):
+        draw_pile = player_state.get("drawPile") or []
+        if not draw_pile:
+            break
+        entry = draw_pile.pop(0)
+        card = entry.get("card") or {}
+        player_state.setdefault(target, []).append({
+            **entry,
+            "faceDown": face_down,
+            "tapped": tapped or (target == "mana" and len(playmode_card_civilizations(card)) > 1),
+            "manaProduced": [],
+        })
+        moved_names.append(card.get("name") or "a card")
+    return moved_names
+
+
+def playmode_apply_temporary_battle_effect(
+    player_state: dict,
+    *,
+    amount: int | None = None,
+    predicate=None,
+    power: int = 0,
+    breaker: int = 0,
+    unblockable: bool = False,
+    speed_attacker: bool = False,
+    slayer: bool = False,
+    can_attack_untapped: bool = False,
+    blocker: bool = False,
+    must_attack: bool = False,
+    attackable: bool = False,
+    untap_on_win: bool = False,
+) -> list[str]:
+    affected: list[str] = []
+    for battle_entry in player_state.get("battle") or []:
+        if amount is not None and len(affected) >= amount:
+            break
+        card = battle_entry.get("card") or {}
+        if predicate and not predicate(card, battle_entry):
+            continue
+        if power:
+            battle_entry["temporaryPower"] = int(battle_entry.get("temporaryPower") or 0) + power
+        if breaker:
+            battle_entry["temporaryBreaker"] = max(int(battle_entry.get("temporaryBreaker") or 0), breaker)
+        if unblockable:
+            battle_entry["temporaryUnblockable"] = True
+        if speed_attacker:
+            battle_entry["summoningSick"] = False
+        if slayer:
+            battle_entry["temporarySlayer"] = True
+        if can_attack_untapped:
+            battle_entry["temporaryCanAttackUntapped"] = True
+        if blocker:
+            battle_entry["temporaryBlocker"] = True
+        if must_attack:
+            battle_entry["temporaryMustAttack"] = True
+        if attackable:
+            battle_entry["temporaryAttackable"] = True
+        if untap_on_win:
+            battle_entry["temporaryUntapOnWin"] = True
+        affected.append(card.get("name") or "a creature")
+    return affected
+
+
+def playmode_battle_to_zone_entries(
+    state_payload: dict,
+    target_zone: str,
+    *,
+    seat_filter: int | None = None,
+    predicate,
+    exclude_uid: str | None = None,
+    limit: int | None = None,
+    face_down: bool = False,
+    tapped: bool = False,
+) -> list[str]:
+    moved: list[str] = []
+    seat_keys = [playmode_seat_key(seat_filter)] if seat_filter in {1, 2} else ["player_one", "player_two"]
+    for seat_key in seat_keys:
+        player_state = state_payload.get(seat_key) or {}
+        survivors = []
+        for battle_entry in player_state.get("battle") or []:
+            if exclude_uid and battle_entry.get("uid") == exclude_uid:
+                survivors.append(battle_entry)
+                continue
+            if limit is not None and len(moved) >= limit:
+                survivors.append(battle_entry)
+                continue
+            card = battle_entry.get("card") or {}
+            if predicate(card, battle_entry):
+                for stack_entry in playmode_stack_entries(battle_entry):
+                    player_state.setdefault(target_zone, []).append({
+                        **stack_entry,
+                        "faceDown": face_down,
+                        "tapped": tapped or (target_zone == "mana" and len(playmode_card_civilizations(stack_entry.get("card") or {})) > 1),
+                        "manaProduced": [],
+                    })
+                moved.append(card.get("name") or "Unknown creature")
+                continue
+            survivors.append(battle_entry)
+        player_state["battle"] = survivors
     return moved
 
 
@@ -1114,7 +1361,7 @@ def playmode_pending_choice_view(state_payload: dict, viewer_seat: int | None, a
     if not isinstance(choice, dict):
         return None
     controller = choice.get("controller_seat")
-    public_kinds = {"choose_battle_target", "blocker"}
+    public_kinds = {"choose_battle_target", "blocker", "attack_response"}
     if choice.get("kind") not in public_kinds and not admin_override and viewer_seat != controller:
         return {
             "kind": "hidden",
@@ -1405,10 +1652,22 @@ def playmode_resolve_spell_effect(state_payload: dict, seat: int, entry: dict) -
         drawn = playmode_draw_cards(player_state, 2)
         if drawn:
             messages.append(f"drew {drawn} card(s)")
+    elif "draw a card" in text or "draw 1 card" in text:
+        drawn = playmode_draw_cards(player_state, 1)
+        if drawn:
+            messages.append("drew 1 card")
+    elif "draw up to 3 cards" in text or "draw 3 cards" in text:
+        drawn = playmode_draw_cards(player_state, 3)
+        if drawn:
+            messages.append(f"drew {drawn} card(s)")
     if name == "emergency typhoon":
         drawn = playmode_draw_cards(player_state, 2)
         discarded = playmode_discard_from_hand(player_state, 1)
         messages.append(f"drew {drawn} and discarded {', '.join(discarded) if discarded else 'nothing'}")
+    if "your opponent discards a card at random" in text or "your opponent discards 1 card at random" in text:
+        discarded = playmode_discard_from_hand(opponent_state, 1)
+        if discarded:
+            messages.append(f"opponent discarded {', '.join(discarded)}")
     if "search your deck" in text:
         candidates = []
         for entry in player_state.get("drawPile") or []:
@@ -1437,14 +1696,182 @@ def playmode_resolve_spell_effect(state_payload: dict, seat: int, entry: dict) -
         moved = playmode_top_to_mana(player_state)
         if moved:
             messages.append("put the top card of deck into mana")
-    if "tap all creatures in the battle zone that don't have \"blocker\"" in text:
+    if "add the top card of your deck to your shields" in text or "put the top card of your deck into your shield zone" in text:
+        moved = playmode_top_to_shield(player_state)
+        if moved:
+            messages.append("added the top card of deck to shields")
+    if "add up to 3 cards from the top of your deck to your shields" in text:
+        moved = playmode_move_top_cards(player_state, "shields", 3, face_down=True)
+        if moved:
+            messages.append(f"added {len(moved)} cards from deck to shields")
+    if "put the top 2 cards of your deck into your mana zone" in text:
+        moved = playmode_move_top_cards(player_state, "mana", 2, tapped=True)
+        if moved:
+            messages.append(f"put {len(moved)} cards from deck into mana")
+    if "for each card in your mana zone, put a card from the top of your deck into your mana zone tapped" in text:
+        amount = len(player_state.get("mana") or [])
+        moved = playmode_move_top_cards(player_state, "mana", amount, tapped=True)
+        if moved:
+            messages.append(f"put {len(moved)} cards from deck into mana")
+    if "choose any number of your shields and put them into your mana zone" in text:
+        moved = playmode_move_zone_entries(player_state, "shields", "mana", face_down=False, tapped=True)
+        if moved:
+            messages.append(f"moved {len(moved)} shields to mana")
+    if "choose any number of your shields and put them into your hand" in text:
+        moved = playmode_move_zone_entries(player_state, "shields", "hand", face_down=False)
+        if moved:
+            messages.append(f"moved {len(moved)} shields to hand")
+    if "choose one of your shields and put it into your graveyard" in text:
+        moved = playmode_move_zone_entries(player_state, "shields", "graveyard", amount=1, face_down=False)
+        if moved:
+            messages.append(f"put shield into graveyard: {', '.join(moved)}")
+    if "choose up to 3 of your opponent's shields and put them into his graveyard" in text:
+        moved = playmode_move_zone_entries(opponent_state, "shields", "graveyard", amount=3, face_down=False)
+        if moved:
+            messages.append(f"put opponent shields into graveyard: {', '.join(moved)}")
+    if "your opponent chooses one of his shields for each shield you have. he puts the rest of his shields into his hand" in text:
+        keep_count = len(player_state.get("shields") or [])
+        shields = opponent_state.get("shields") or []
+        if len(shields) > keep_count:
+            moved_count = len(shields) - keep_count
+            opponent_state["shields"] = shields[:keep_count]
+            opponent_state.setdefault("hand", []).extend({**entry, "faceDown": False, "tapped": False} for entry in shields[keep_count:])
+            messages.append(f"opponent moved {moved_count} extra shield(s) to hand")
+    power_attacker_match = re.search(r'power attacker \+(\d+)', text)
+    flat_power_match = re.search(r'gets? \+(\d+) power', text)
+    temporary_power = int((power_attacker_match or flat_power_match).group(1)) if (power_attacker_match or flat_power_match) else 0
+    temporary_breaker = 3 if "triple breaker" in text else (2 if "double breaker" in text else 0)
+    if temporary_power or temporary_breaker or "can't be blocked this turn" in text or "speed attacker" in text or "slayer" in text:
+        affects_all = "each of your creatures" in text or "your creatures in the battle zone" in text
+        amount = None if affects_all else (2 if "choose up to 2 of your creatures" in text else 1)
+        affected = playmode_apply_temporary_battle_effect(
+            player_state,
+            amount=amount,
+            predicate=lambda target_card, _entry: playmode_is_creature(target_card),
+            power=temporary_power,
+            breaker=temporary_breaker,
+            unblockable="can't be blocked this turn" in text or "your creatures in the battle zone can't be blocked this turn" in text,
+            speed_attacker="speed attacker" in text,
+            slayer="slayer" in text,
+        )
+        if affected:
+            messages.append(f"temporary effect applied to: {', '.join(affected)}")
+    if "ignore any effects that would prevent your creatures from attacking your opponent" in text or "ignore any effects that would prevent that creature from attacking your opponent" in text:
+        affected = playmode_apply_temporary_battle_effect(
+            player_state,
+            amount=1 if "choose one of your creatures" in text else None,
+            predicate=lambda target_card, _entry: playmode_is_creature(target_card),
+            unblockable="can't be blocked" in text,
+            speed_attacker=True,
+        )
+        if affected:
+            messages.append(f"attack restrictions ignored for: {', '.join(affected)}")
+    if "whenever any of your opponent's creatures is destroyed this turn" in text:
+        state_payload["temporary_slash_and_burn_seat"] = seat
+        messages.append("slash and burn delayed trigger armed for this turn")
+    if "each creature of that race can attack untapped creatures and can't be blocked while attacking a creature" in text:
+        affected = playmode_apply_temporary_battle_effect(
+            player_state,
+            predicate=lambda target_card, _entry: playmode_is_creature(target_card),
+            unblockable=True,
+            can_attack_untapped=True,
+        )
+        if affected:
+            messages.append(f"relentless blitz applied to: {', '.join(affected)}")
+    if "creatures of that civilization can't attack you" in text:
+        affected = playmode_apply_temporary_battle_effect(
+            opponent_state,
+            predicate=lambda target_card, _entry: playmode_is_creature(target_card),
+            must_attack=False,
+        )
+        for battle_entry in opponent_state.get("battle") or []:
+            if playmode_is_creature(battle_entry.get("card") or {}):
+                battle_entry["temporaryCannotAttackPlayer"] = True
+        if affected:
+            messages.append(f"miraculous truce restricted attacks from: {', '.join(affected)}")
+    if "your creatures can attack it this turn as though it were tapped" in text:
+        affected = playmode_apply_temporary_battle_effect(
+            opponent_state,
+            amount=1,
+            predicate=lambda target_card, battle_entry: playmode_is_creature(target_card) and not battle_entry.get("tapped"),
+            attackable=True,
+        )
+        if affected:
+            messages.append(f"marked attackable as tapped: {', '.join(affected)}")
+    if "whenever any of your creatures would be destroyed this turn, put it into your mana zone instead" in text:
+        state_payload["temporary_destroy_to_mana_seat"] = seat
+        messages.append("your creatures will go to mana instead of graveyard this turn")
+    if name == "fists of forever":
+        affected = playmode_apply_temporary_battle_effect(
+            player_state,
+            amount=1,
+            predicate=lambda target_card, _entry: playmode_is_creature(target_card),
+            untap_on_win=True,
+        )
+        if affected:
+            messages.append(f"will untap after winning battle: {', '.join(affected)}")
+    if "each of your opponent's creatures gets \"this creature attacks if able\"" in text or "during your opponent's next turn, each of his creatures attacks if able" in text:
+        affected = playmode_apply_temporary_battle_effect(
+            opponent_state,
+            predicate=lambda target_card, _entry: playmode_is_creature(target_card),
+            must_attack=True,
+        )
+        if affected:
+            messages.append(f"opponent creatures must attack: {', '.join(affected)}")
+    if "it gets \"this creature attacks if able\"" in text:
+        affected = playmode_apply_temporary_battle_effect(
+            opponent_state,
+            amount=1,
+            predicate=lambda target_card, _entry: playmode_is_creature(target_card),
+            must_attack=True,
+        )
+        if affected:
+            messages.append(f"opponent creature must attack: {', '.join(affected)}")
+    if "each of your creatures in the battle zone gets \"blocker" in text:
+        affected = playmode_apply_temporary_battle_effect(
+            player_state,
+            predicate=lambda target_card, _entry: playmode_is_creature(target_card),
+            blocker=True,
+        )
+        if affected:
+            messages.append(f"temporary blocker applied to: {', '.join(affected)}")
+    if re.search(r"tap all creatures in the battle zone that don.?t have \"blocker", text):
         tapped = playmode_tap_battle_entries(
             state_payload,
             predicate=lambda target_card, _entry: playmode_is_creature(target_card) and not playmode_has_keyword(target_card, "blocker"),
         )
         if tapped:
             messages.append(f"tapped non-blockers: {', '.join(tapped)}")
-    if "choose one of your opponent's creatures in the battle zone" in text and "tap it" in text:
+    if "tap all your opponent's creatures in the battle zone" in text:
+        tapped = playmode_tap_battle_entries(
+            state_payload,
+            seat_filter=opponent_seat,
+            predicate=lambda target_card, _entry: playmode_is_creature(target_card),
+        )
+        if tapped:
+            messages.append(f"tapped opponent creatures: {', '.join(tapped)}")
+    if "tap all darkness creatures in the battle zone" in text:
+        tapped = playmode_tap_battle_entries(
+            state_payload,
+            predicate=lambda target_card, _entry: playmode_is_creature(target_card) and "Darkness" in playmode_card_civilizations(target_card),
+        )
+        if tapped:
+            messages.append(f"tapped darkness creatures: {', '.join(tapped)}")
+    elif "tap all fire creatures in the battle zone" in text:
+        tapped = playmode_tap_battle_entries(
+            state_payload,
+            predicate=lambda target_card, _entry: playmode_is_creature(target_card) and "Fire" in playmode_card_civilizations(target_card),
+        )
+        if tapped:
+            messages.append(f"tapped fire creatures: {', '.join(tapped)}")
+    if "tap all creatures in the battle zone except light creatures" in text:
+        tapped = playmode_tap_battle_entries(
+            state_payload,
+            predicate=lambda target_card, _entry: playmode_is_creature(target_card) and "Light" not in playmode_card_civilizations(target_card),
+        )
+        if tapped:
+            messages.append(f"tapped non-light creatures: {', '.join(tapped)}")
+    if re.search(r"choose (?:one|1) of your opponent's creatures in the battle zone", text) and "tap it" in text:
         candidates = playmode_battle_candidates(
             state_payload,
             seat_filter=opponent_seat,
@@ -1459,6 +1886,99 @@ def playmode_resolve_spell_effect(state_payload: dict, seat: int, entry: dict) -
         })
         if candidates:
             messages.append("waiting for tap target")
+    if "choose up to 2 of your opponent's creatures in the battle zone and tap them" in text:
+        tapped = playmode_tap_battle_entries(
+            state_payload,
+            seat_filter=opponent_seat,
+            limit=2,
+            predicate=lambda target_card, _entry: playmode_is_creature(target_card) and not _entry.get("tapped"),
+        )
+        if tapped:
+            messages.append(f"tapped opponent creatures: {', '.join(tapped)}")
+    if name == "cloned deflector":
+        amount = 1 + sum(
+            1
+            for target_state in (player_state, opponent_state)
+            for grave_entry in (target_state.get("graveyard") or [])
+            if normalize_rule_text((grave_entry.get("card") or {}).get("name")) == "cloned deflector"
+        )
+        tapped = playmode_tap_battle_entries(
+            state_payload,
+            seat_filter=opponent_seat,
+            limit=amount,
+            predicate=lambda target_card, _entry: playmode_is_creature(target_card) and not _entry.get("tapped"),
+        )
+        if tapped:
+            messages.append(f"cloned deflector tapped: {', '.join(tapped)}")
+    if not state_payload.get("pending_choice") and (
+        "choose a creature in battle zone" in text
+        or "choose a creature in the battle zone" in text
+    ) and "return" in text and "hand" in text:
+        candidates = playmode_battle_candidates(
+            state_payload,
+            predicate=lambda target_card, _entry: playmode_is_creature(target_card),
+        )
+        playmode_set_pending_choice(state_payload, {
+            "kind": "choose_battle_target",
+            "effect": "bounce",
+            "controller_seat": seat,
+            "message": f"Choose a creature to return to hand for {card.get('name', 'this spell')}.",
+            "candidates": candidates,
+        })
+        if candidates:
+            messages.append("waiting for bounce target")
+    if not state_payload.get("pending_choice") and (
+        "return one of your opponent's creatures" in text
+        or "return up to 2 of your opponent's creatures" in text
+        or "return an opponent's creature" in text
+        or ("choose one of your opponent's non-evolution creatures" in text and name != "hide and seek")
+    ):
+        candidates = playmode_battle_candidates(
+            state_payload,
+            seat_filter=opponent_seat,
+            predicate=lambda target_card, _entry: playmode_is_creature(target_card),
+        )
+        playmode_set_pending_choice(state_payload, {
+            "kind": "choose_battle_target",
+            "effect": "bounce",
+            "controller_seat": seat,
+            "message": f"Choose an opponent creature to return to hand for {card.get('name', 'this spell')}.",
+            "candidates": candidates,
+        })
+        if candidates:
+            messages.append("waiting for bounce target")
+    if not state_payload.get("pending_choice") and "choose up to 2 creatures in the battle zone and return them to their owners' hands" in text:
+        bounced = playmode_bounce_battle_entries(
+            state_payload,
+            limit=2,
+            predicate=lambda target_card, _entry: playmode_is_creature(target_card),
+        )
+        if bounced:
+            messages.append(f"returned creatures to hand: {', '.join(bounced)}")
+    if name == "cloned spiral":
+        amount = 1 + sum(
+            1
+            for target_state in (player_state, opponent_state)
+            for grave_entry in (target_state.get("graveyard") or [])
+            if normalize_rule_text((grave_entry.get("card") or {}).get("name")) == "cloned spiral"
+        )
+        bounced = playmode_bounce_battle_entries(
+            state_payload,
+            limit=amount,
+            predicate=lambda target_card, _entry: playmode_is_creature(target_card),
+        )
+        if bounced:
+            messages.append(f"cloned spiral returned: {', '.join(bounced)}")
+    if name == "hide and seek":
+        bounced = playmode_bounce_battle_entries(
+            state_payload,
+            seat_filter=opponent_seat,
+            limit=1,
+            predicate=lambda target_card, _entry: playmode_is_creature(target_card) and not playmode_is_evolution(target_card),
+        )
+        discarded = playmode_discard_from_hand(opponent_state, 1)
+        if bounced or discarded:
+            messages.append(f"returned non-evolution creature: {', '.join(bounced) if bounced else 'none'}; opponent discarded {', '.join(discarded) if discarded else 'nothing'}")
     if "destroy all creatures that have power 2000 or less" in text:
         destroyed = playmode_destroy_battle_entries(
             state_payload,
@@ -1466,6 +1986,75 @@ def playmode_resolve_spell_effect(state_payload: dict, seat: int, entry: dict) -
         )
         if destroyed:
             messages.append(f"destroyed 2000-or-less creatures: {', '.join(destroyed)}")
+    if "destroy all creatures that have power 4000 or less" in text:
+        destroyed = playmode_destroy_battle_entries(
+            state_payload,
+            predicate=lambda target_card, _entry: playmode_is_creature(target_card) and playmode_power_value(target_card) <= 4000,
+        )
+        if destroyed:
+            messages.append(f"destroyed 4000-or-less creatures: {', '.join(destroyed)}")
+    if "destroy all your opponent's creatures that have power 3000 or less" in text:
+        destroyed = playmode_destroy_battle_entries(
+            state_payload,
+            seat_filter=opponent_seat,
+            predicate=lambda target_card, _entry: playmode_is_creature(target_card) and playmode_power_value(target_card) <= 3000,
+        )
+        if destroyed:
+            messages.append(f"destroyed opponent 3000-or-less creatures: {', '.join(destroyed)}")
+    if "destroy all your opponent's creatures" in text:
+        destroyed = playmode_destroy_battle_entries(
+            state_payload,
+            seat_filter=opponent_seat,
+            predicate=lambda target_card, _entry: playmode_is_creature(target_card),
+        )
+        if destroyed:
+            messages.append(f"destroyed all opponent creatures: {', '.join(destroyed)}")
+    if "destroy any number of your opponent's creatures that have total power 8000 or less" in text:
+        remaining_power = 8000
+        destroyed: list[str] = []
+        opponent_battle = list(opponent_state.get("battle") or [])
+        for target in sorted(opponent_battle, key=lambda battle_entry: playmode_power_value(battle_entry.get("card") or {})):
+            target_card = target.get("card") or {}
+            power = playmode_power_value(target_card)
+            if playmode_is_creature(target_card) and power <= remaining_power:
+                remaining_power -= power
+                destroyed.extend(playmode_destroy_battle_entries(
+                    state_payload,
+                    seat_filter=opponent_seat,
+                    limit=1,
+                    predicate=lambda card, battle_entry, uid=target.get("uid"): battle_entry.get("uid") == uid,
+                ))
+        if destroyed:
+            messages.append(f"destroyed total 8000 power or less: {', '.join(destroyed)}")
+    if name == "cloned blade":
+        amount = 1 + sum(
+            1
+            for target_state in (player_state, opponent_state)
+            for grave_entry in (target_state.get("graveyard") or [])
+            if normalize_rule_text((grave_entry.get("card") or {}).get("name")) == "cloned blade"
+        )
+        destroyed = playmode_destroy_battle_entries(
+            state_payload,
+            seat_filter=opponent_seat,
+            limit=amount,
+            predicate=lambda target_card, _entry: playmode_is_creature(target_card) and playmode_power_value(target_card) <= 3000,
+        )
+        if destroyed:
+            messages.append(f"cloned blade destroyed: {', '.join(destroyed)}")
+    if "choose a number less than or equal to 6000. destroy all creatures that have that power" in text:
+        powers = [
+            playmode_power_value(battle_entry.get("card") or {})
+            for seat_key in ("player_one", "player_two")
+            for battle_entry in (state_payload.get(seat_key, {}).get("battle") or [])
+            if playmode_is_creature(battle_entry.get("card") or {}) and playmode_power_value(battle_entry.get("card") or {}) <= 6000
+        ]
+        chosen_power = max(powers) if powers else 0
+        destroyed = playmode_destroy_battle_entries(
+            state_payload,
+            predicate=lambda target_card, _entry, power=chosen_power: playmode_is_creature(target_card) and playmode_power_value(target_card) == power,
+        )
+        if destroyed:
+            messages.append(f"destroyed {chosen_power}-power creatures: {', '.join(destroyed)}")
     if not state_payload.get("pending_choice") and "destroy one of your opponent's creatures that has \"blocker\" and power 6000 or less" in text:
         destroyed = playmode_destroy_battle_entries(
             state_payload,
@@ -1484,7 +2073,7 @@ def playmode_resolve_spell_effect(state_payload: dict, seat: int, entry: dict) -
         )
         if destroyed:
             messages.append(f"destroyed blocker: {', '.join(destroyed)}")
-    elif not state_payload.get("pending_choice") and "destroy one of your opponent's creatures that has power 2000 or less" in text:
+    elif not state_payload.get("pending_choice") and re.search(r"destroy (?:one|1) of your opponent's creatures that has power 2000 or less", text):
         destroyed = playmode_destroy_battle_entries(
             state_payload,
             seat_filter=opponent_seat,
@@ -1493,7 +2082,7 @@ def playmode_resolve_spell_effect(state_payload: dict, seat: int, entry: dict) -
         )
         if destroyed:
             messages.append(f"destroyed creature: {', '.join(destroyed)}")
-    elif not state_payload.get("pending_choice") and "destroy one of your opponent's creatures that has power 4000 or less" in text:
+    elif not state_payload.get("pending_choice") and re.search(r"destroy (?:one|1) of your opponent's creatures that has power 4000 or less", text):
         destroyed = playmode_destroy_battle_entries(
             state_payload,
             seat_filter=opponent_seat,
@@ -1511,17 +2100,445 @@ def playmode_resolve_spell_effect(state_payload: dict, seat: int, entry: dict) -
         )
         if destroyed:
             messages.append(f"destroyed creature: {', '.join(destroyed)}")
+    if not state_payload.get("pending_choice") and "destroy one of your opponent's untapped creatures" in text:
+        destroyed = playmode_destroy_battle_entries(
+            state_payload,
+            seat_filter=opponent_seat,
+            limit=1,
+            predicate=lambda target_card, battle_entry: playmode_is_creature(target_card) and not battle_entry.get("tapped"),
+        )
+        if destroyed:
+            messages.append(f"destroyed untapped creature: {', '.join(destroyed)}")
+    if "destroy up to 2 of your opponent's creatures" in text:
+        destroyed = playmode_destroy_battle_entries(
+            state_payload,
+            seat_filter=opponent_seat,
+            limit=2,
+            predicate=lambda target_card, _entry: playmode_is_creature(target_card),
+        )
+        if destroyed:
+            messages.append(f"destroyed up to 2 creatures: {', '.join(destroyed)}")
+    if "destroy one of your creatures" in text or "destroy up to 2 of your creatures" in text:
+        limit = 2 if "up to 2" in text else 1
+        destroyed = playmode_destroy_battle_entries(
+            state_payload,
+            seat_filter=seat,
+            limit=limit,
+            predicate=lambda target_card, _entry: playmode_is_creature(target_card),
+        )
+        if destroyed:
+            messages.append(f"destroyed your creature(s): {', '.join(destroyed)}")
+    if "destroy any number of your creatures. then draw that many cards" in text:
+        destroyed = playmode_destroy_battle_entries(
+            state_payload,
+            seat_filter=seat,
+            predicate=lambda target_card, _entry: playmode_is_creature(target_card),
+        )
+        drawn = playmode_draw_cards(player_state, len(destroyed))
+        if destroyed:
+            messages.append(f"destroyed your creatures and drew {drawn}: {', '.join(destroyed)}")
+    if name == "eldritch poison":
+        destroyed = playmode_destroy_battle_entries(
+            state_payload,
+            seat_filter=seat,
+            limit=1,
+            predicate=lambda target_card, _entry: playmode_is_creature(target_card) and "Darkness" in playmode_card_civilizations(target_card),
+        )
+        moved = playmode_move_zone_entries(player_state, "mana", "hand", amount=1, predicate=lambda target_card, _entry: playmode_is_creature(target_card))
+        if destroyed or moved:
+            messages.append(f"eldritch poison destroyed {', '.join(destroyed) if destroyed else 'nothing'} and returned {', '.join(moved) if moved else 'nothing'}")
+    if "your opponent chooses one of his creatures in the battle zone and destroys it" in text:
+        destroyed = playmode_destroy_battle_entries(
+            state_payload,
+            seat_filter=opponent_seat,
+            limit=1,
+            predicate=lambda target_card, _entry: playmode_is_creature(target_card),
+        )
+        if destroyed:
+            messages.append(f"opponent sacrificed creature: {', '.join(destroyed)}")
+    if "your opponent chooses one of his creatures in the battle zone or a card in his mana zone and puts it into his graveyard" in text:
+        destroyed = playmode_destroy_battle_entries(
+            state_payload,
+            seat_filter=opponent_seat,
+            limit=1,
+            predicate=lambda target_card, _entry: playmode_is_creature(target_card),
+        )
+        if destroyed:
+            messages.append(f"opponent put creature into graveyard: {', '.join(destroyed)}")
+        else:
+            moved = playmode_move_zone_entries(opponent_state, "mana", "graveyard", amount=1)
+            if moved:
+                messages.append(f"opponent put mana into graveyard: {', '.join(moved)}")
+    if "your opponent chooses one of his creatures in the battle zone or one of his shields and puts it into his graveyard" in text:
+        destroyed = playmode_destroy_battle_entries(
+            state_payload,
+            seat_filter=opponent_seat,
+            limit=1,
+            predicate=lambda target_card, _entry: playmode_is_creature(target_card),
+        )
+        if destroyed:
+            messages.append(f"opponent put creature into graveyard: {', '.join(destroyed)}")
+        else:
+            moved = playmode_move_zone_entries(opponent_state, "shields", "graveyard", amount=1, face_down=False)
+            if moved:
+                messages.append(f"opponent put shield into graveyard: {', '.join(moved)}")
+    if name == "cloned nightmare":
+        amount = 1 + sum(
+            1
+            for target_state in (player_state, opponent_state)
+            for grave_entry in (target_state.get("graveyard") or [])
+            if normalize_rule_text((grave_entry.get("card") or {}).get("name")) == "cloned nightmare"
+        )
+        discarded = playmode_discard_from_hand(opponent_state, amount)
+        if discarded:
+            messages.append(f"cloned nightmare discarded: {', '.join(discarded)}")
+    if "your opponent discards all cards from his hand" in text:
+        discarded = playmode_discard_from_hand(opponent_state, len(opponent_state.get("hand") or []))
+        if discarded:
+            messages.append(f"opponent discarded all cards: {', '.join(discarded)}")
+    if "your opponent chooses and discards 2 cards from his hand" in text:
+        discarded = playmode_discard_from_hand(opponent_state, 2)
+        if discarded:
+            messages.append(f"opponent discarded {', '.join(discarded)}")
+    if "your opponent chooses and discards a card from his hand for each light creature he has in the battle zone" in text:
+        amount = sum(1 for battle_entry in opponent_state.get("battle") or [] if "Light" in playmode_card_civilizations(battle_entry.get("card") or {}))
+        discarded = playmode_discard_from_hand(opponent_state, amount)
+        if discarded:
+            messages.append(f"opponent discarded for light creatures: {', '.join(discarded)}")
     if "return a card from your mana zone to your hand" in text:
         mana = player_state.get("mana") or []
         if mana:
             player_state.setdefault("hand", []).extend(playmode_stack_entries(mana.pop(0)))
             messages.append("returned a mana card to hand")
+    if "return a spell from your mana zone to your hand" in text:
+        moved = playmode_move_zone_entries(player_state, "mana", "hand", amount=1, predicate=lambda target_card, _entry: playmode_is_spell(target_card))
+        if moved:
+            messages.append(f"returned spell from mana to hand: {', '.join(moved)}")
+    if "return a creature that costs 6 or more from your mana zone to your hand" in text:
+        moved = playmode_move_zone_entries(player_state, "mana", "hand", amount=1, predicate=lambda target_card, _entry: playmode_is_creature(target_card) and int(target_card.get("cost") or 0) >= 6)
+        if moved:
+            messages.append(f"returned 6+ cost creature from mana to hand: {', '.join(moved)}")
+    if "return up to 2 cards from your mana zone to your hand" in text:
+        moved = playmode_move_zone_entries(player_state, "mana", "hand", amount=2)
+        if moved:
+            messages.append(f"returned mana cards to hand: {', '.join(moved)}")
+    if "return up to 3 cards from your mana zone to your hand" in text:
+        moved = playmode_move_zone_entries(player_state, "mana", "hand", amount=3)
+        if moved:
+            messages.append(f"returned mana cards to hand: {', '.join(moved)}")
+    if "each player returns all cards from his mana zone to his hand" in text:
+        moved_counts = []
+        for target in (player_state, opponent_state):
+            moved = playmode_move_zone_entries(target, "mana", "hand")
+            moved_counts.append(len(moved))
+        messages.append(f"returned mana to hands: {moved_counts[0]} / {moved_counts[1]}")
     if "return a creature from your graveyard to your hand" in text:
         graveyard = player_state.get("graveyard") or []
         index = next((idx for idx, grave_entry in enumerate(graveyard) if playmode_is_creature(grave_entry.get("card") or {})), -1)
         if index >= 0:
             player_state.setdefault("hand", []).extend(playmode_stack_entries(graveyard.pop(index)))
             messages.append("returned a creature from graveyard to hand")
+    if "return up to 2 creatures from your graveyard to your hand" in text:
+        moved = playmode_move_zone_entries(player_state, "graveyard", "hand", amount=2, predicate=lambda target_card, _entry: playmode_is_creature(target_card))
+        if moved:
+            messages.append(f"returned creatures from graveyard to hand: {', '.join(moved)}")
+    if "put up to 2 creatures from your graveyard into your mana zone" in text:
+        moved = playmode_move_zone_entries(player_state, "graveyard", "mana", amount=2, predicate=lambda target_card, _entry: playmode_is_creature(target_card), tapped=True)
+        if moved:
+            messages.append(f"put graveyard creatures into mana: {', '.join(moved)}")
+    if "put any number of cards from your mana zone into your graveyard" in text:
+        amount = len(player_state.get("mana") or [])
+        moved = playmode_move_zone_entries(player_state, "mana", "graveyard")
+        drawn = playmode_draw_cards(player_state, len(moved))
+        if moved:
+            messages.append(f"moved {amount} mana to graveyard and drew {drawn}")
+    if "discard any number of cards from your hand. then draw that many cards" in text:
+        amount = len(player_state.get("hand") or [])
+        discarded = playmode_discard_from_hand(player_state, amount)
+        drawn = playmode_draw_cards(player_state, len(discarded))
+        if discarded:
+            messages.append(f"discarded {len(discarded)} and drew {drawn}")
+    if "each player counts the cards in his hand, shuffles these cards into his deck, then draws that many cards" in text:
+        counts = []
+        for target_state in (player_state, opponent_state):
+            hand = target_state.get("hand") or []
+            amount = len(hand)
+            target_state.setdefault("drawPile", []).extend(hand)
+            target_state["hand"] = []
+            playmode_shuffle_player_deck(target_state)
+            counts.append(playmode_draw_cards(target_state, amount))
+        messages.append(f"cycled hands and drew {counts[0]} / {counts[1]}")
+    if name == "cosmic darts":
+        shields = player_state.get("shields") or []
+        if shields:
+            shield = shields[0]
+            shield_card = shield.get("card") or {}
+            if playmode_is_spell(shield_card):
+                shields.pop(0)
+                triggered = {**shield, "faceDown": False, "tapped": False, "manaProduced": []}
+                nested_messages = playmode_resolve_spell_effect(state_payload, seat, triggered)
+                player_state.setdefault("graveyard", []).append(triggered)
+                messages.append(f"cosmic darts cast {shield_card.get('name', 'a spell')} from shield" + (f" ({'; '.join(nested_messages)})" if nested_messages else ""))
+            else:
+                messages.append("cosmic darts checked a shield and left it in place")
+    if "search your opponent's deck" in text and "put it into his graveyard" in text:
+        moved = playmode_move_zone_entries(opponent_state, "drawPile", "graveyard", amount=2)
+        playmode_shuffle_player_deck(opponent_state)
+        if moved:
+            messages.append(f"milled opponent deck cards: {', '.join(moved)}")
+    if "reveal the top 4 cards of your deck" in text and "put all water cards from among them into your hand" in text:
+        revealed = []
+        for _ in range(4):
+            draw_pile = player_state.get("drawPile") or []
+            if not draw_pile:
+                break
+            revealed.append(draw_pile.pop(0))
+        water = [card_entry for card_entry in revealed if "Water" in playmode_card_civilizations(card_entry.get("card") or {})]
+        others = [card_entry for card_entry in revealed if card_entry not in water]
+        player_state.setdefault("hand", []).extend({**card_entry, "faceDown": False, "tapped": False} for card_entry in water)
+        player_state.setdefault("graveyard", []).extend({**card_entry, "faceDown": False, "tapped": False} for card_entry in others)
+        messages.append(f"revealed 4; kept {len(water)} water card(s)")
+    if "look at the top 4 cards of your deck. put one of them into your hand" in text:
+        revealed = []
+        for _ in range(4):
+            draw_pile = player_state.get("drawPile") or []
+            if not draw_pile:
+                break
+            revealed.append(draw_pile.pop(0))
+        if revealed:
+            player_state.setdefault("hand", []).append({**revealed.pop(0), "faceDown": False, "tapped": False})
+            player_state.setdefault("drawPile", []).extend(revealed)
+            messages.append("looked at top 4 and put one card into hand")
+    if "reveal the top 4 cards of your deck" in text and "has \"blocker\" into your hand" in text:
+        revealed = []
+        for _ in range(4):
+            draw_pile = player_state.get("drawPile") or []
+            if not draw_pile:
+                break
+            revealed.append(draw_pile.pop(0))
+        blocker_index = next((index for index, card_entry in enumerate(revealed) if playmode_has_keyword(card_entry.get("card") or {}, "blocker")), -1)
+        if blocker_index >= 0:
+            player_state.setdefault("hand", []).append({**revealed.pop(blocker_index), "faceDown": False, "tapped": False})
+        player_state.setdefault("drawPile", []).extend(revealed)
+        messages.append("revealed top 4 and kept a blocker" if blocker_index >= 0 else "revealed top 4 and found no blocker")
+    if "look at your opponent's hand and shields" in text:
+        messages.append(f"looked at opponent hand ({len(opponent_state.get('hand') or [])}) and shields ({len(opponent_state.get('shields') or [])})")
+    if "look at up to 3 of your opponent's shields" in text:
+        messages.append(f"looked at {min(3, len(opponent_state.get('shields') or []))} opponent shield(s)")
+    if "look at your opponent's hand" in text and "discards all darkness spells" in text:
+        discarded = playmode_move_zone_entries(opponent_state, "hand", "graveyard", predicate=lambda target_card, _entry: playmode_is_spell(target_card) and "Darkness" in playmode_card_civilizations(target_card))
+        if discarded:
+            messages.append(f"discarded opponent darkness spells: {', '.join(discarded)}")
+    if "look at your opponent's hand and choose a card from it" in text:
+        discarded = playmode_discard_from_hand(opponent_state, 1)
+        if discarded:
+            messages.append(f"opponent discarded chosen card: {', '.join(discarded)}")
+    if "choose a number. show your hand to your opponent and discard from it each card that has that cost" in text:
+        all_costs = [
+            int((hand_entry.get("card") or {}).get("cost") or 0)
+            for hand_entry in (player_state.get("hand") or []) + (opponent_state.get("hand") or [])
+        ]
+        chosen_cost = max(set(all_costs), key=all_costs.count) if all_costs else 0
+        own = playmode_move_zone_entries(player_state, "hand", "graveyard", predicate=lambda target_card, _entry, cost=chosen_cost: int(target_card.get("cost") or 0) == cost)
+        opp = playmode_move_zone_entries(opponent_state, "hand", "graveyard", predicate=lambda target_card, _entry, cost=chosen_cost: int(target_card.get("cost") or 0) == cost)
+        messages.append(f"roulette discarded cost {chosen_cost}: {len(own)} / {len(opp)}")
+    if "choose one of your opponent's water or darkness creatures" in text and "mana zone" in text:
+        moved = playmode_battle_to_zone_entries(
+            state_payload,
+            "mana",
+            seat_filter=opponent_seat,
+            limit=1,
+            predicate=lambda target_card, _entry: playmode_is_creature(target_card) and any(civ in {"Water", "Darkness"} for civ in playmode_card_civilizations(target_card)),
+            tapped=True,
+        )
+        if moved:
+            messages.append(f"put opponent creature into mana: {', '.join(moved)}")
+    if "choose 1 of your opponent's creatures in the battle zone and put it into his mana zone" in text:
+        moved = playmode_battle_to_zone_entries(
+            state_payload,
+            "mana",
+            seat_filter=opponent_seat,
+            limit=1,
+            predicate=lambda target_card, _entry: playmode_is_creature(target_card),
+            tapped=True,
+        )
+        if moved:
+            messages.append(f"put opponent creature into mana: {', '.join(moved)}")
+    if "add a card from your mana zone to your shields face down" in text:
+        moved = playmode_move_zone_entries(player_state, "mana", "shields", amount=1, face_down=True)
+        if moved:
+            messages.append(f"added mana card to shields: {', '.join(moved)}")
+    if "choose a card in your opponent's mana zone and put it into his graveyard" in text:
+        moved = playmode_move_zone_entries(opponent_state, "mana", "graveyard", amount=1)
+        if moved:
+            messages.append(f"put opponent mana into graveyard: {', '.join(moved)}")
+    if "add a card from your hand to your shields face down" in text:
+        moved = playmode_move_zone_entries(player_state, "hand", "shields", amount=1, face_down=True)
+        if moved:
+            messages.append(f"added hand card to shields: {', '.join(moved)}")
+    if name == "dance of the sproutlings":
+        hand = player_state.get("hand") or []
+        first_creature = next((hand_entry for hand_entry in hand if playmode_is_creature(hand_entry.get("card") or {})), None)
+        race = (first_creature.get("card") or {}).get("race_label") if first_creature else ""
+        moved = playmode_move_zone_entries(
+            player_state,
+            "hand",
+            "mana",
+            predicate=lambda target_card, _entry, wanted=race: bool(wanted) and playmode_is_creature(target_card) and target_card.get("race_label") == wanted,
+            tapped=True,
+        )
+        if moved:
+            messages.append(f"moved {race} creatures from hand to mana: {', '.join(moved)}")
+    if "put a card from your mana zone into your hand. then put a card from your hand into your mana zone" in text:
+        to_hand = playmode_move_zone_entries(player_state, "mana", "hand", amount=1)
+        to_mana = playmode_move_zone_entries(player_state, "hand", "mana", amount=1, tapped=True)
+        messages.append(f"swapped mana/hand: {len(to_hand)} to hand, {len(to_mana)} to mana")
+    if "each player puts all the cards from his mana zone into his hand" in text and "puts all the cards from his hand into his mana zone tapped" in text:
+        for target_state in (player_state, opponent_state):
+            old_mana = list(target_state.get("mana") or [])
+            old_hand = list(target_state.get("hand") or [])
+            target_state["mana"] = []
+            target_state["hand"] = []
+            target_state["hand"].extend({**entry, "faceDown": False, "tapped": False, "manaProduced": []} for entry in old_mana)
+            target_state["mana"].extend({**entry, "faceDown": False, "tapped": True, "manaProduced": []} for entry in old_hand)
+        messages.append("swapped both players' mana and hands")
+    if "put 1 of your creatures from the battle zone into your mana zone" in text:
+        moved = playmode_battle_to_zone_entries(
+            state_payload,
+            "mana",
+            seat_filter=seat,
+            limit=1,
+            predicate=lambda target_card, _entry: playmode_is_creature(target_card),
+            tapped=True,
+        )
+        if moved:
+            messages.append(f"put your creature into mana: {', '.join(moved)}")
+    if "choose a non-evolution creature in the battle zone and add it to its owner's shields" in text:
+        moved = playmode_battle_to_zone_entries(
+            state_payload,
+            "shields",
+            limit=1,
+            predicate=lambda target_card, _entry: playmode_is_creature(target_card) and not playmode_is_evolution(target_card),
+            face_down=True,
+        )
+        if moved:
+            messages.append(f"added creature to shields: {', '.join(moved)}")
+    if name == "hydro hurricane":
+        light_count = sum(1 for battle_entry in player_state.get("battle") or [] if "Light" in playmode_card_civilizations(battle_entry.get("card") or {}))
+        darkness_count = sum(1 for battle_entry in player_state.get("battle") or [] if "Darkness" in playmode_card_civilizations(battle_entry.get("card") or {}))
+        mana_moved = playmode_move_zone_entries(opponent_state, "mana", "hand", amount=light_count)
+        creatures_bounced = playmode_bounce_battle_entries(
+            state_payload,
+            seat_filter=opponent_seat,
+            limit=darkness_count,
+            predicate=lambda target_card, _entry: playmode_is_creature(target_card),
+        )
+        if mana_moved or creatures_bounced:
+            messages.append(f"hydro hurricane returned {len(mana_moved)} mana and {len(creatures_bounced)} creature(s)")
+    if name == "miraculous plague":
+        bounced = playmode_bounce_battle_entries(
+            state_payload,
+            seat_filter=opponent_seat,
+            limit=1,
+            predicate=lambda target_card, _entry: playmode_is_creature(target_card),
+        )
+        destroyed = playmode_destroy_battle_entries(
+            state_payload,
+            seat_filter=opponent_seat,
+            limit=1,
+            predicate=lambda target_card, _entry: playmode_is_creature(target_card),
+        )
+        to_hand = playmode_move_zone_entries(opponent_state, "mana", "hand", amount=1)
+        to_grave = playmode_move_zone_entries(opponent_state, "mana", "graveyard", amount=1)
+        messages.append(f"miraculous plague returned {len(bounced)} creature, destroyed {len(destroyed)}, moved mana {len(to_hand)} hand/{len(to_grave)} grave")
+    if name == "shock hurricane":
+        own_bounced = playmode_bounce_battle_entries(
+            state_payload,
+            seat_filter=seat,
+            predicate=lambda target_card, _entry: playmode_is_creature(target_card),
+        )
+        opp_bounced = playmode_bounce_battle_entries(
+            state_payload,
+            seat_filter=opponent_seat,
+            limit=len(own_bounced),
+            predicate=lambda target_card, _entry: playmode_is_creature(target_card),
+        )
+        if own_bounced or opp_bounced:
+            messages.append(f"shock hurricane returned {len(own_bounced)} of yours and {len(opp_bounced)} opponent creature(s)")
+    if name == "soulswap":
+        moved_to_mana = playmode_battle_to_zone_entries(
+            state_payload,
+            "mana",
+            limit=1,
+            predicate=lambda target_card, _entry: playmode_is_creature(target_card),
+            tapped=True,
+        )
+        mana_count = len(player_state.get("mana") or [])
+        mana_zone = player_state.get("mana") or []
+        target_index = next((index for index, mana_entry in enumerate(mana_zone) if playmode_is_creature(mana_entry.get("card") or {}) and not playmode_is_evolution(mana_entry.get("card") or {}) and int((mana_entry.get("card") or {}).get("cost") or 0) <= mana_count), -1)
+        if target_index >= 0:
+            summoned = mana_zone.pop(target_index)
+            player_state.setdefault("battle", []).append({**summoned, "faceDown": False, "tapped": False, "manaProduced": [], "summoningSick": True})
+        messages.append(f"soulswap moved {len(moved_to_mana)} creature to mana and summoned {1 if target_index >= 0 else 0}")
+    if name == "static warp":
+        for target_state in (player_state, opponent_state):
+            battle = target_state.get("battle") or []
+            keep_uid = next((battle_entry.get("uid") for battle_entry in battle if playmode_is_creature(battle_entry.get("card") or {})), None)
+            for battle_entry in battle:
+                if battle_entry.get("uid") != keep_uid and playmode_is_creature(battle_entry.get("card") or {}):
+                    battle_entry["tapped"] = True
+        messages.append("static warp tapped all but one creature for each player")
+    if name == "transmogrify":
+        target_states = (player_state, opponent_state)
+        destroyed_owner = None
+        for target_state in target_states:
+            destroyed = playmode_destroy_battle_entries(
+                state_payload,
+                seat_filter=seat if target_state is player_state else opponent_seat,
+                limit=1,
+                predicate=lambda target_card, _entry: playmode_is_creature(target_card),
+            )
+            if destroyed:
+                destroyed_owner = target_state
+                break
+        if destroyed_owner is not None:
+            revealed_to_grave = []
+            while destroyed_owner.get("drawPile"):
+                revealed = destroyed_owner["drawPile"].pop(0)
+                revealed_card = revealed.get("card") or {}
+                if playmode_is_creature(revealed_card) and not playmode_is_evolution(revealed_card):
+                    destroyed_owner.setdefault("battle", []).append({**revealed, "faceDown": False, "tapped": False, "manaProduced": [], "summoningSick": True})
+                    messages.append(f"transmogrify put {revealed_card.get('name', 'a creature')} into battle")
+                    break
+                revealed_to_grave.append(revealed)
+            destroyed_owner.setdefault("graveyard", []).extend({**grave_entry, "faceDown": False, "tapped": False} for grave_entry in revealed_to_grave)
+    if name == "vacuum gel":
+        destroyed = playmode_destroy_battle_entries(
+            state_payload,
+            seat_filter=opponent_seat,
+            limit=1,
+            predicate=lambda target_card, battle_entry: playmode_is_creature(target_card) and not battle_entry.get("tapped") and any(civ in {"Light", "Nature"} for civ in playmode_card_civilizations(target_card)),
+        )
+        if destroyed:
+            messages.append(f"destroyed untapped light/nature creature: {', '.join(destroyed)}")
+    if name == "whisking whirlwind":
+        for battle_entry in player_state.get("battle") or []:
+            if playmode_is_creature(battle_entry.get("card") or {}):
+                battle_entry["tapped"] = False
+        messages.append("untapped all your creatures")
+    if name == "zombie carnival":
+        graveyard = player_state.get("graveyard") or []
+        first_creature = next((grave_entry for grave_entry in graveyard if playmode_is_creature(grave_entry.get("card") or {})), None)
+        race = (first_creature.get("card") or {}).get("race_label") if first_creature else ""
+        moved = playmode_move_zone_entries(
+            player_state,
+            "graveyard",
+            "hand",
+            amount=3,
+            predicate=lambda target_card, _entry, wanted=race: bool(wanted) and playmode_is_creature(target_card) and target_card.get("race_label") == wanted,
+        )
+        if moved:
+            messages.append(f"returned {race} creatures from graveyard: {', '.join(moved)}")
     return messages
 
 
@@ -1588,9 +2605,12 @@ def playmode_resolve_pending_choice(state_payload: dict, payload: PlaymodeAction
         raise HTTPException(status_code=400, detail="This choice belongs to the other player.")
     kind = choice.get("kind")
     if payload.action == "pass_pending":
-        if kind == "blocker":
+        if kind in {"blocker", "attack_response"}:
+            pending_attack = choice.get("pending_attack") or {}
+            state_payload["pending_attack"] = pending_attack
             state_payload.pop("pending_choice", None)
-            state_payload["pending_attack"] = choice.get("pending_attack") or {}
+            if kind == "attack_response":
+                return playmode_resolve_pending_attack_target(state_payload, pending_attack)
             return "No blocker chosen. Choose a shield to break.", None
         state_payload.pop("pending_choice", None)
         return "Choice skipped.", None
@@ -1631,7 +2651,7 @@ def playmode_resolve_pending_choice(state_payload: dict, payload: PlaymodeAction
         playmode_shuffle_player_deck(player_state)
         state_payload.pop("pending_choice", None)
         return f"Searched {entry.get('card', {}).get('name', 'a card')} into hand.", None
-    if kind == "blocker":
+    if kind in {"blocker", "attack_response"}:
         blocker_state = state_payload.get(playmode_seat_key(target_seat)) or {}
         index, blocker = playmode_find_zone_entry(blocker_state, "battle", target_uid)
         if index == -1 or not blocker:
@@ -1642,18 +2662,213 @@ def playmode_resolve_pending_choice(state_payload: dict, payload: PlaymodeAction
         attacker_state = state_payload.get(playmode_seat_key(attacker_seat)) or {}
         _, attacker = playmode_find_zone_entry(attacker_state, "battle", pending_attack.get("uid"))
         if attacker:
-            attacker_power = playmode_power_value(attacker.get("card") or {})
-            blocker_power = playmode_power_value(blocker.get("card") or {})
-            if attacker_power <= blocker_power:
+            attacker_power = playmode_entry_power_value(attacker, attacking=True)
+            blocker_power = playmode_entry_power_value(blocker)
+            attacker_destroyed = attacker_power <= blocker_power or playmode_entry_has_slayer(blocker)
+            blocker_destroyed = blocker_power <= attacker_power or playmode_entry_has_slayer(attacker)
+            if attacker_destroyed:
                 attacker_state["battle"] = [entry for entry in (attacker_state.get("battle") or []) if entry.get("uid") != attacker.get("uid")]
                 attacker_state.setdefault("graveyard", []).extend(playmode_stack_entries(attacker))
-            if blocker_power <= attacker_power:
+            if blocker_destroyed:
                 blocker_state["battle"] = [entry for entry in (blocker_state.get("battle") or []) if entry.get("uid") != blocker.get("uid")]
                 blocker_state.setdefault("graveyard", []).extend(playmode_stack_entries(blocker))
         state_payload.pop("pending_choice", None)
         state_payload.pop("pending_attack", None)
         return f"Blocked with {blocker.get('card', {}).get('name', 'a blocker')}.", None
     raise HTTPException(status_code=400, detail="Unsupported pending choice.")
+
+
+def playmode_available_blockers(state_payload: dict, defender_seat: int) -> list[dict]:
+    defender_state = state_payload.get(playmode_seat_key(defender_seat)) or {}
+    return [
+        {
+            "seat": defender_seat,
+            "zone": "battle",
+            "uid": blocker.get("uid"),
+            "name": (blocker.get("card") or {}).get("name") or "Blocker",
+            "image_path": (blocker.get("card") or {}).get("image_path"),
+        }
+        for blocker in (defender_state.get("battle") or [])
+        if playmode_is_creature(blocker.get("card") or {}) and (playmode_has_keyword(blocker.get("card") or {}, "blocker") or blocker.get("temporaryBlocker")) and not blocker.get("tapped")
+    ]
+
+
+def playmode_set_attack_response_choice(state_payload: dict, pending_attack: dict) -> tuple[str, int | None]:
+    attacker_seat = int(pending_attack.get("seat") or state_payload.get("active_seat") or 1)
+    defender_seat = playmode_opponent_seat(attacker_seat)
+    attacker_state = state_payload.get(playmode_seat_key(attacker_seat)) or {}
+    _, attacker = playmode_find_zone_entry(attacker_state, "battle", pending_attack.get("uid"))
+    attacker_name = (attacker.get("card") or {}).get("name") if attacker else "the attacker"
+    target_kind = pending_attack.get("target_kind")
+    target_label = "a shield"
+    if target_kind == "creature":
+        defender_state = state_payload.get(playmode_seat_key(defender_seat)) or {}
+        _, defender = playmode_find_zone_entry(defender_state, "battle", pending_attack.get("target_uid"))
+        target_label = (defender.get("card") or {}).get("name") if defender else "a creature"
+    elif target_kind == "direct":
+        target_label = "the opponent directly"
+    candidates = [] if playmode_entry_unblockable(attacker or {}, target_kind) else playmode_available_blockers(state_payload, defender_seat)
+    state_payload["pending_attack"] = pending_attack
+    state_payload["pending_choice"] = {
+        "kind": "attack_response",
+        "controller_seat": defender_seat,
+        "message": f"{attacker_name} is attacking {target_label}. Choose a blocker, or pass.",
+        "pending_attack": pending_attack,
+        "candidates": candidates,
+    }
+    return f"Player {attacker_seat} targeted {target_label}. Waiting for defender response.", None
+
+
+def playmode_resolve_pending_attack_target(state_payload: dict, pending_attack: dict) -> tuple[str, int | None]:
+    target_kind = pending_attack.get("target_kind")
+    if target_kind == "shield":
+        return playmode_resolve_shield_attack(state_payload, pending_attack)
+    if target_kind == "creature":
+        return playmode_resolve_creature_attack(state_payload, pending_attack)
+    if target_kind == "direct":
+        attacker_seat = int(pending_attack.get("seat") or state_payload.get("active_seat") or 1)
+        attacker_state = state_payload.get(playmode_seat_key(attacker_seat)) or {}
+        defender_state = state_payload.get(playmode_seat_key(playmode_opponent_seat(attacker_seat))) or {}
+        _, attacker = playmode_find_zone_entry(attacker_state, "battle", pending_attack.get("uid"))
+        if attacker and not playmode_can_attack_players(attacker, defender_state):
+            raise HTTPException(status_code=400, detail="This creature cannot attack players.")
+        state_payload.pop("pending_attack", None)
+        return f"Player {attacker_seat} attacked directly and won.", attacker_seat
+    raise HTTPException(status_code=400, detail="Choose a target for the attack first.")
+
+
+def playmode_choose_computer_blocker(state_payload: dict, choice: dict) -> dict | None:
+    candidates = choice.get("candidates") or []
+    if not candidates:
+        return None
+    pending_attack = choice.get("pending_attack") or {}
+    attacker_seat = int(pending_attack.get("seat") or playmode_opponent_seat(2))
+    attacker_state = state_payload.get(playmode_seat_key(attacker_seat)) or {}
+    _, attacker = playmode_find_zone_entry(attacker_state, "battle", pending_attack.get("uid"))
+    attacker_power = playmode_entry_power_value(attacker or {}, attacking=True)
+    target_kind = pending_attack.get("target_kind")
+    scored: list[tuple[int, int, dict]] = []
+    for candidate in candidates:
+        blocker_state = state_payload.get(playmode_seat_key(int(candidate.get("seat") or 2))) or {}
+        _, blocker = playmode_find_zone_entry(blocker_state, "battle", candidate.get("uid"))
+        blocker_power = playmode_entry_power_value(blocker or {})
+        if target_kind == "direct":
+            score = 100000 + blocker_power
+        elif blocker_power >= attacker_power:
+            score = 50000 + blocker_power - attacker_power
+        else:
+            score = blocker_power - attacker_power
+        scored.append((score, blocker_power, candidate))
+    scored.sort(key=lambda item: (item[0], item[1]), reverse=True)
+    if not scored:
+        return None
+    best_score, _blocker_power, candidate = scored[0]
+    if target_kind != "direct" and best_score < 0:
+        return None
+    return candidate
+
+
+def playmode_resolve_computer_pending_choice(state_payload: dict) -> tuple[list[str], int | None]:
+    choice = state_payload.get("pending_choice")
+    if not isinstance(choice, dict) or int(choice.get("controller_seat") or 0) != 2:
+        return [], None
+    kind = choice.get("kind")
+    messages: list[str] = []
+    winner_seat: int | None = None
+    if kind in {"attack_response", "blocker"}:
+        candidate = playmode_choose_computer_blocker(state_payload, choice)
+        action = PlaymodeActionIn(profile_id=0, action="choose_pending", seat=2, target_seat=2, target_uid=candidate.get("uid")) if candidate else PlaymodeActionIn(profile_id=0, action="pass_pending", seat=2)
+        message, winner_seat = playmode_resolve_pending_choice(state_payload, action)
+        messages.append(f"Computer {'blocked' if candidate else 'declined to block'}. {message}")
+        return messages, winner_seat
+    candidates = choice.get("candidates") or []
+    if candidates:
+        candidate = candidates[0]
+        message, winner_seat = playmode_resolve_pending_choice(
+            state_payload,
+            PlaymodeActionIn(profile_id=0, action="choose_pending", seat=2, target_seat=candidate.get("seat"), target_uid=candidate.get("uid")),
+        )
+    else:
+        message, winner_seat = playmode_resolve_pending_choice(state_payload, PlaymodeActionIn(profile_id=0, action="pass_pending", seat=2))
+    messages.append(f"Computer resolved choice. {message}")
+    return messages, winner_seat
+
+
+def playmode_resolve_shield_attack(state_payload: dict, pending_attack: dict) -> tuple[str, int | None]:
+    attacker_seat = int(pending_attack.get("seat") or state_payload.get("active_seat") or 1)
+    target_seat = int(pending_attack.get("target_seat") or playmode_opponent_seat(attacker_seat))
+    if target_seat != playmode_opponent_seat(attacker_seat):
+        raise HTTPException(status_code=400, detail="Choose an opponent shield.")
+    target_state = state_payload.get(playmode_seat_key(target_seat)) or {}
+    shields = target_state.get("shields") or []
+    if not shields:
+        state_payload.pop("pending_attack", None)
+        return f"Player {attacker_seat} attacked directly and won.", attacker_seat
+    chosen_index = next((index for index, shield in enumerate(shields) if shield.get("uid") == pending_attack.get("target_uid")), 0)
+    breaks = max(1, int(pending_attack.get("breaks_remaining") or 1))
+    broken_names = []
+    trigger_names = []
+    for _ in range(min(breaks, len(shields))):
+        index = min(chosen_index, len(shields) - 1)
+        shield = shields.pop(index)
+        card = shield.get("card") or {}
+        broken_names.append(card.get("name") or "a shield")
+        revealed = {**shield, "faceDown": False, "tapped": False, "manaProduced": []}
+        if playmode_is_spell(card) and playmode_has_keyword(card, "shield trigger"):
+            trigger_names.append(card.get("name") or "a shield trigger")
+            playmode_resolve_spell_effect(state_payload, target_seat, revealed)
+            target_state.setdefault("graveyard", []).append(revealed)
+        elif playmode_is_creature(card) and playmode_has_keyword(card, "shield trigger"):
+            trigger_names.append(card.get("name") or "a shield trigger")
+            target_state.setdefault("battle", []).append(revealed)
+            playmode_resolve_enter_battle(state_payload, target_seat, revealed)
+        else:
+            target_state.setdefault("hand", []).append(revealed)
+        chosen_index = 0
+    state_payload.pop("pending_attack", None)
+    trigger_suffix = f" Shield Trigger! {', '.join(trigger_names)} triggered." if trigger_names else ""
+    return f"Player {attacker_seat} broke {', '.join(broken_names)}.{trigger_suffix}", None
+
+
+def playmode_resolve_creature_attack(state_payload: dict, pending_attack: dict) -> tuple[str, int | None]:
+    attacker_seat = int(pending_attack.get("seat") or state_payload.get("active_seat") or 1)
+    target_seat = int(pending_attack.get("target_seat") or playmode_opponent_seat(attacker_seat))
+    if target_seat != playmode_opponent_seat(attacker_seat):
+        raise HTTPException(status_code=400, detail="Choose an opponent creature.")
+    attacker_state = state_payload.get(playmode_seat_key(attacker_seat)) or {}
+    defender_state = state_payload.get(playmode_seat_key(target_seat)) or {}
+    attacker_index, attacker = playmode_find_zone_entry(attacker_state, "battle", pending_attack.get("uid"))
+    defender_index, defender = playmode_find_zone_entry(defender_state, "battle", pending_attack.get("target_uid"))
+    if attacker_index == -1 or not attacker:
+        raise HTTPException(status_code=404, detail="Attacking creature not found.")
+    if defender_index == -1 or not defender:
+        raise HTTPException(status_code=404, detail="Target creature not found.")
+    if not playmode_can_be_attacked(defender, attacker):
+        raise HTTPException(status_code=400, detail="This creature cannot be attacked by that attacker.")
+    if not defender.get("tapped") and not defender.get("temporaryAttackable") and not playmode_can_attack_untapped(attacker):
+        raise HTTPException(status_code=400, detail="Only tapped creatures can be attacked.")
+    attacker_power = playmode_entry_power_value(attacker, attacking=True)
+    defender_power = playmode_entry_power_value(defender)
+    attacker_name = (attacker.get("card") or {}).get("name") or "attacker"
+    defender_name = (defender.get("card") or {}).get("name") or "defender"
+    attacker_destroyed = attacker_power <= defender_power or playmode_entry_has_slayer(defender)
+    defender_destroyed = defender_power <= attacker_power or playmode_entry_has_slayer(attacker)
+    if attacker_destroyed:
+        attacker_state["battle"] = [entry for entry in (attacker_state.get("battle") or []) if entry.get("uid") != attacker.get("uid")]
+        attacker_state.setdefault("graveyard", []).extend(playmode_stack_entries(attacker))
+    if defender_destroyed:
+        defender_state["battle"] = [entry for entry in (defender_state.get("battle") or []) if entry.get("uid") != defender.get("uid")]
+        defender_state.setdefault("graveyard", []).extend(playmode_stack_entries(defender))
+    if defender_destroyed and not attacker_destroyed and attacker.get("temporaryUntapOnWin"):
+        attacker["tapped"] = False
+    state_payload.pop("pending_attack", None)
+    if defender_destroyed and not attacker_destroyed:
+        result = f"{defender_name} was destroyed."
+    elif attacker_destroyed and not defender_destroyed:
+        result = f"{attacker_name} was destroyed."
+    else:
+        result = "Both creatures were destroyed."
+    return f"{attacker_name} attacked {defender_name}. {attacker_power} vs {defender_power}. {result}", None
 
 
 def playmode_advance_phase(state_payload: dict) -> tuple[str, int | None]:
@@ -1668,9 +2883,18 @@ def playmode_advance_phase(state_payload: dict) -> tuple[str, int | None]:
                 entry["tapped"] = False
                 entry["manaProduced"] = []
         player_state["manaPool"] = []
+        player_state["chargedThisTurn"] = False
         state_payload["current_phase"] = "draw"
         return f"Player {active_seat} resolved untap.", None
     if phase == "draw":
+        if (
+            int(state_payload.get("current_turn") or 1) == 1
+            and active_seat == int(state_payload.get("starting_seat") or active_seat)
+            and not state_payload.get("first_draw_skipped")
+        ):
+            state_payload["first_draw_skipped"] = True
+            state_payload["current_phase"] = "charge"
+            return f"Player {active_seat} skipped their first draw.", None
         draw_pile = player_state.get("drawPile") or []
         if not draw_pile:
             winner = playmode_opponent_seat(active_seat)
@@ -1689,6 +2913,7 @@ def playmode_advance_phase(state_payload: dict) -> tuple[str, int | None]:
     if phase == "attack":
         state_payload.pop("pending_attack", None)
         state_payload["current_phase"] = "end"
+        playmode_clear_temporary_effects(player_state)
         return f"Player {active_seat} finished attack phase.", None
     previous_seat = active_seat
     next_seat = playmode_opponent_seat(active_seat)
@@ -1698,7 +2923,26 @@ def playmode_advance_phase(state_payload: dict) -> tuple[str, int | None]:
     state_payload.pop("pending_attack", None)
     next_state = state_payload.get(playmode_seat_key(next_seat)) or {}
     next_state["manaPool"] = []
+    next_state["chargedThisTurn"] = False
     return f"Player {previous_seat} passed the turn to Player {next_seat}.", None
+
+
+def playmode_auto_resolve_mandatory_phases(state_payload: dict) -> tuple[list[str], int | None]:
+    messages: list[str] = []
+    winner_seat: int | None = None
+    safety = 0
+    while (
+        str(state_payload.get("current_phase") or "untap") in {"untap", "draw", "end"}
+        and not state_payload.get("pending_choice")
+        and not state_payload.get("winner_seat")
+        and safety < 8
+    ):
+        safety += 1
+        message, winner_seat = playmode_advance_phase(state_payload)
+        messages.append(message)
+        if winner_seat:
+            break
+    return messages, winner_seat
 
 
 def playmode_apply_action(state_payload: dict, payload: PlaymodeActionIn) -> tuple[str, int | None]:
@@ -1722,7 +2966,7 @@ def playmode_apply_action(state_payload: dict, payload: PlaymodeActionIn) -> tup
     if action == "advance_phase":
         return playmode_advance_phase(state_payload)
     seat = payload.seat or active_seat
-    if seat != active_seat and action != "break_shield":
+    if seat != active_seat and action not in {"break_shield", "battle_creature"}:
         raise HTTPException(status_code=400, detail="Only the active player's cards can be controlled.")
     player_state = state_payload.get(playmode_seat_key(seat)) or {}
 
@@ -1752,11 +2996,15 @@ def playmode_apply_action(state_payload: dict, payload: PlaymodeActionIn) -> tup
                 "sourceUid": entry.get("uid"),
                 "civilization": chosen,
             })
-        return f"Player {seat} tapped {entry.get('card', {}).get('name', 'a card')} for mana.", None
+        pool_size = len(player_state.get("manaPool") or [])
+        mana_label = f"{chosen} mana" if chosen else "mana"
+        return f"Player {seat} tapped {entry.get('card', {}).get('name', 'a card')} for {mana_label}. Mana pool: {pool_size}.", None
 
     if action == "charge":
         if phase != "charge":
             raise HTTPException(status_code=400, detail="Cards can only be charged during charge phase.")
+        if player_state.get("chargedThisTurn"):
+            raise HTTPException(status_code=400, detail="You can only charge one card each turn.")
         index, entry = playmode_find_zone_entry(player_state, "hand", payload.uid)
         if index == -1 or not entry:
             raise HTTPException(status_code=404, detail="Hand card not found.")
@@ -1767,6 +3015,7 @@ def playmode_apply_action(state_payload: dict, payload: PlaymodeActionIn) -> tup
             "tapped": len(playmode_card_civilizations(entry.get("card") or {})) > 1,
             "manaProduced": [],
         })
+        player_state["chargedThisTurn"] = True
         state_payload["current_phase"] = "play"
         return f"Player {seat} charged {entry.get('card', {}).get('name', 'a card')}.", None
 
@@ -1777,6 +3026,8 @@ def playmode_apply_action(state_payload: dict, payload: PlaymodeActionIn) -> tup
         if index == -1 or not entry:
             raise HTTPException(status_code=404, detail="Hand card not found.")
         card = entry.get("card") or {}
+        if not card.get("id"):
+            raise HTTPException(status_code=400, detail="Card data is not loaded yet.")
         alcadeias_active = any(
             normalize_rule_text((battle_entry.get("card") or {}).get("name")) == "alcadeias lord of spirits"
             for seat_key in ("player_one", "player_two")
@@ -1792,6 +3043,8 @@ def playmode_apply_action(state_payload: dict, payload: PlaymodeActionIn) -> tup
             effect_messages = playmode_resolve_spell_effect(state_payload, seat, entry)
             target_zone = "mana" if playmode_has_keyword(card, "charger") else "graveyard"
             player_state.setdefault(target_zone, []).append({**entry, "faceDown": False, "tapped": False, "manaProduced": []})
+            if not effect_messages:
+                effect_messages = ["resolved with no automated effect"]
             suffix = f" ({'; '.join(effect_messages)})" if effect_messages else ""
             return f"Player {seat} cast {card.get('name', 'a spell')}.{suffix}", None
         battle_entry = {**entry, "faceDown": False, "tapped": False, "manaProduced": []}
@@ -1823,6 +3076,8 @@ def playmode_apply_action(state_payload: dict, payload: PlaymodeActionIn) -> tup
         card = entry.get("card") or {}
         if not playmode_is_creature(card):
             raise HTTPException(status_code=400, detail="Only creatures can attack.")
+        if playmode_has_keyword(card, "blocker"):
+            raise HTTPException(status_code=400, detail="Blocker creatures cannot attack.")
         if entry.get("tapped"):
             raise HTTPException(status_code=400, detail="This creature is already tapped.")
         if entry.get("summoningSick"):
@@ -1830,71 +3085,207 @@ def playmode_apply_action(state_payload: dict, payload: PlaymodeActionIn) -> tup
         entry["tapped"] = True
         trigger_messages = playmode_resolve_attack_trigger(state_payload, seat, entry)
         opponent_state = state_payload.get(playmode_seat_key(playmode_opponent_seat(seat))) or {}
-        blockers = [
-            {
-                "seat": playmode_opponent_seat(seat),
-                "zone": "battle",
-                "uid": blocker.get("uid"),
-                "name": (blocker.get("card") or {}).get("name") or "Blocker",
-                "image_path": (blocker.get("card") or {}).get("image_path"),
-            }
-            for blocker in (opponent_state.get("battle") or [])
-            if playmode_is_creature(blocker.get("card") or {}) and playmode_has_keyword(blocker.get("card") or {}, "blocker") and not blocker.get("tapped")
-        ]
-        if not opponent_state.get("shields"):
-            return f"Player {seat} attacked directly and won.", seat
         pending_attack = {
             "seat": seat,
             "uid": entry.get("uid"),
-            "breaks_remaining": playmode_breaker_count(card),
+            "breaks_remaining": playmode_breaker_count(card, entry),
         }
-        if blockers:
-            playmode_set_pending_choice(state_payload, {
-                "kind": "blocker",
-                "controller_seat": playmode_opponent_seat(seat),
-                "message": f"Choose a blocker against {card.get('name', 'the attacker')}, or pass.",
-                "pending_attack": pending_attack,
-                "candidates": blockers,
-            })
-            suffix = f" ({'; '.join(trigger_messages)})" if trigger_messages else ""
-            return f"Player {seat} attacked with {card.get('name', 'a creature')}.{suffix} Waiting for blocker choice.", None
+        if not opponent_state.get("shields"):
+            if not playmode_can_attack_players(entry, opponent_state):
+                raise HTTPException(status_code=400, detail="This creature cannot attack players.")
+            pending_attack["target_kind"] = "direct"
+            return playmode_set_attack_response_choice(state_payload, pending_attack)
         state_payload["pending_attack"] = pending_attack
         suffix = f" ({'; '.join(trigger_messages)})" if trigger_messages else ""
-        return f"Player {seat} attacked with {card.get('name', 'a creature')}.{suffix} Choose an opponent shield to break.", None
+        return f"Player {seat} attacked with {card.get('name', 'a creature')}.{suffix} Choose an opponent shield or tapped creature.", None
 
     if action == "break_shield":
         pending = state_payload.get("pending_attack") or {}
+        if not pending.get("uid") and not pending.get("effect_can_break_shield"):
+            raise HTTPException(status_code=400, detail="You can only break shields with a successful attack or a card effect.")
+        if pending.get("target_kind") and pending.get("target_kind") != "shield":
+            raise HTTPException(status_code=400, detail="This attack is already targeting something else.")
         attacker_seat = int(pending.get("seat") or active_seat)
         target_seat = payload.target_seat or payload.seat
         if target_seat != playmode_opponent_seat(attacker_seat):
             raise HTTPException(status_code=400, detail="Choose an opponent shield.")
         target_state = state_payload.get(playmode_seat_key(target_seat)) or {}
         shields = target_state.get("shields") or []
+        attacker_state = state_payload.get(playmode_seat_key(attacker_seat)) or {}
+        _, attacker = playmode_find_zone_entry(attacker_state, "battle", pending.get("uid"))
+        if attacker and not playmode_can_attack_players(attacker, target_state):
+            raise HTTPException(status_code=400, detail="This creature cannot attack players.")
         if not shields:
             state_payload.pop("pending_attack", None)
             return f"Player {attacker_seat} attacked directly and won.", attacker_seat
-        chosen_index = next((index for index, shield in enumerate(shields) if shield.get("uid") == payload.target_uid), 0)
-        breaks = max(1, int(pending.get("breaks_remaining") or 1))
-        broken_names = []
-        for _ in range(min(breaks, len(shields))):
-            index = min(chosen_index, len(shields) - 1)
-            shield = shields.pop(index)
-            card = shield.get("card") or {}
-            broken_names.append(card.get("name") or "a shield")
-            revealed = {**shield, "faceDown": False, "tapped": False, "manaProduced": []}
-            if playmode_is_spell(card) and playmode_has_keyword(card, "shield trigger"):
-                playmode_resolve_spell_effect(state_payload, target_seat, revealed)
-                target_state.setdefault("graveyard", []).append(revealed)
-            elif playmode_is_creature(card) and playmode_has_keyword(card, "shield trigger"):
-                target_state.setdefault("battle", []).append(revealed)
-                playmode_resolve_enter_battle(state_payload, target_seat, revealed)
-            else:
-                target_state.setdefault("hand", []).append(revealed)
-            chosen_index = 0
-        state_payload.pop("pending_attack", None)
-        return f"Player {attacker_seat} broke {', '.join(broken_names)}.", None
+        if payload.target_uid and not any(shield.get("uid") == payload.target_uid for shield in shields):
+            raise HTTPException(status_code=404, detail="Shield is no longer available.")
+        pending.update({
+            "target_kind": "shield",
+            "target_seat": target_seat,
+            "target_uid": payload.target_uid,
+        })
+        return playmode_set_attack_response_choice(state_payload, pending)
+
+    if action == "battle_creature":
+        pending = state_payload.get("pending_attack") or {}
+        attacker_seat = int(pending.get("seat") or active_seat)
+        target_seat = payload.target_seat or payload.seat
+        if target_seat != playmode_opponent_seat(attacker_seat):
+            raise HTTPException(status_code=400, detail="Choose an opponent creature.")
+        attacker_state = state_payload.get(playmode_seat_key(attacker_seat)) or {}
+        defender_state = state_payload.get(playmode_seat_key(target_seat)) or {}
+        attacker_index, attacker = playmode_find_zone_entry(attacker_state, "battle", pending.get("uid"))
+        defender_index, defender = playmode_find_zone_entry(defender_state, "battle", payload.target_uid)
+        if attacker_index == -1 or not attacker:
+            raise HTTPException(status_code=404, detail="Attacking creature not found.")
+        if defender_index == -1 or not defender:
+            raise HTTPException(status_code=404, detail="Target creature not found.")
+        if not playmode_can_be_attacked(defender, attacker):
+            raise HTTPException(status_code=400, detail="This creature cannot be attacked by that attacker.")
+        if not defender.get("tapped") and not defender.get("temporaryAttackable") and not playmode_can_attack_untapped(attacker):
+            raise HTTPException(status_code=400, detail="Only tapped creatures can be attacked.")
+        pending.update({
+            "target_kind": "creature",
+            "target_seat": target_seat,
+            "target_uid": payload.target_uid,
+        })
+        return playmode_set_attack_response_choice(state_payload, pending)
 
     raise HTTPException(status_code=400, detail="Unsupported Playmode action.")
+
+
+def playmode_take_computer_turn(state_payload: dict) -> tuple[list[str], int | None]:
+    messages: list[str] = []
+    winner_seat: int | None = None
+    steps = 0
+    while int(state_payload.get("active_seat") or 1) == 2 and not winner_seat and steps < 40:
+        steps += 1
+        if state_payload.get("pending_choice"):
+            if int((state_payload.get("pending_choice") or {}).get("controller_seat") or 0) == 2:
+                choice_messages, winner_seat = playmode_resolve_computer_pending_choice(state_payload)
+                messages.extend(choice_messages)
+                continue
+            break
+        phase = str(state_payload.get("current_phase") or "untap")
+        computer_state = state_payload.get("player_two") or {}
+        try:
+            if phase in {"untap", "draw"}:
+                message, winner_seat = playmode_apply_action(state_payload, PlaymodeActionIn(profile_id=0, action="advance_phase", seat=2))
+                messages.append(message)
+                continue
+            if phase == "charge":
+                hand = computer_state.get("hand") or []
+                if hand:
+                    message, winner_seat = playmode_apply_action(state_payload, PlaymodeActionIn(profile_id=0, action="charge", seat=2, zone="hand", uid=hand[0].get("uid")))
+                else:
+                    message, winner_seat = playmode_apply_action(state_payload, PlaymodeActionIn(profile_id=0, action="advance_phase", seat=2))
+                messages.append(message)
+                continue
+            if phase == "play":
+                for mana_card in list(computer_state.get("mana") or []):
+                    if not mana_card.get("tapped"):
+                        try:
+                            message, _ = playmode_apply_action(state_payload, PlaymodeActionIn(profile_id=0, action="tap_mana", seat=2, zone="mana", uid=mana_card.get("uid")))
+                            messages.append(message)
+                        except HTTPException:
+                            continue
+                played = False
+                for hand_card in list(computer_state.get("hand") or []):
+                    try:
+                        message, winner_seat = playmode_apply_action(state_payload, PlaymodeActionIn(profile_id=0, action="play_card", seat=2, zone="hand", uid=hand_card.get("uid")))
+                        messages.append(message)
+                        played = True
+                        break
+                    except HTTPException:
+                        continue
+                if not played:
+                    message, winner_seat = playmode_apply_action(state_payload, PlaymodeActionIn(profile_id=0, action="advance_phase", seat=2))
+                    messages.append(message)
+                continue
+            if phase == "attack":
+                attacked = False
+                for battle_card in list(computer_state.get("battle") or []):
+                    if battle_card.get("tapped") or battle_card.get("summoningSick"):
+                        continue
+                    try:
+                        message, winner_seat = playmode_apply_action(state_payload, PlaymodeActionIn(profile_id=0, action="attack", seat=2, zone="battle", uid=battle_card.get("uid")))
+                        messages.append(message)
+                        attacked = True
+                        if winner_seat or state_payload.get("pending_choice"):
+                            break
+                        pending = state_payload.get("pending_attack")
+                        opponent_shields = (state_payload.get("player_one") or {}).get("shields") or []
+                        if pending and opponent_shields:
+                            message, winner_seat = playmode_apply_action(
+                                state_payload,
+                                PlaymodeActionIn(profile_id=0, action="break_shield", seat=2, target_seat=1, target_uid=opponent_shields[0].get("uid")),
+                            )
+                            messages.append(message)
+                    except HTTPException:
+                        continue
+                if state_payload.get("pending_choice") or winner_seat:
+                    break
+                message, winner_seat = playmode_apply_action(state_payload, PlaymodeActionIn(profile_id=0, action="advance_phase", seat=2))
+                messages.append(message)
+                if not attacked:
+                    continue
+                continue
+            message, winner_seat = playmode_apply_action(state_payload, PlaymodeActionIn(profile_id=0, action="advance_phase", seat=2))
+            messages.append(message)
+        except HTTPException as error:
+            messages.append(str(error.detail))
+            break
+    return messages, winner_seat
+
+
+def maybe_run_computer_turn(match: PlayMatch, db: Session) -> None:
+    if match.mode != "computer" or match.status != "active" or match.active_seat != 2:
+        return
+    state_payload = json.loads(match.state_json or "{}")
+    if not state_payload.get("computer_opponent"):
+        return
+    playmode_hydrate_state_cards(state_payload, db)
+    messages, winner_seat = playmode_take_computer_turn(state_payload)
+    if not messages and winner_seat is None:
+        return
+    summary = " ".join(messages[-4:]) if messages else "Computer turn resolved."
+    state_payload["last_move_summary"] = summary
+    now = datetime.utcnow()
+    auto_messages, auto_winner = playmode_auto_resolve_mandatory_phases(state_payload)
+    if auto_messages:
+        state_payload["last_move_summary"] = " ".join((messages + auto_messages)[-4:])
+        playmode_append_events(state_payload, auto_messages)
+    if auto_winner:
+        winner_seat = auto_winner
+    playmode_append_events(state_payload, messages)
+    match.current_turn = int(state_payload.get("current_turn") or match.current_turn or 1)
+    match.active_seat = int(state_payload.get("active_seat") or match.active_seat or 1)
+    match.updated_at = now
+    match.state_json = playmode_dump_state(state_payload)
+    if winner_seat in {1, 2}:
+        match.status = "finished"
+        match.winner_profile_id = match.player_one_profile_id if winner_seat == 1 else None
+    db.commit()
+
+
+def maybe_auto_resolve_playmode_match(match: PlayMatch, db: Session) -> None:
+    if match.status != "active":
+        return
+    state_payload = json.loads(match.state_json or "{}")
+    messages, winner_seat = playmode_auto_resolve_mandatory_phases(state_payload)
+    if not messages and winner_seat is None:
+        return
+    match.current_turn = int(state_payload.get("current_turn") or match.current_turn or 1)
+    match.active_seat = int(state_payload.get("active_seat") or match.active_seat or 1)
+    match.state_json = playmode_dump_state(state_payload)
+    match.updated_at = datetime.utcnow()
+    state_payload["last_move_summary"] = " ".join(messages[-4:])
+    match.state_json = playmode_dump_state(state_payload)
+    if winner_seat in {1, 2}:
+        match.status = "finished"
+        match.winner_profile_id = match.player_one_profile_id if winner_seat == 1 else match.player_two_profile_id
+    db.commit()
 
 
 def ensure_owned_deck(db: Session, public_id: str, profile_id: int) -> Deck:
@@ -1931,6 +3322,7 @@ def playmode_card_view(entry: dict, *, face_down_override: bool | None = None) -
         image_path=None if face_down else card.get("image_path"),
         face_down=face_down,
         tapped=bool(entry.get("tapped")),
+        mana_produced=[] if face_down else list(entry.get("manaProduced") or []),
         underlay_count=len(entry.get("underlays") or []),
     )
 
@@ -1951,18 +3343,22 @@ def playmode_zone_view(player_state: dict, *, hide_hand: bool) -> PlaymodeZoneVi
     )
 
 
-def playmode_match_summary(match: PlayMatch) -> PlaymodeMatchSummaryOut:
+def playmode_match_summary(match: PlayMatch, viewer_profile_id: int | None = None) -> PlaymodeMatchSummaryOut:
     payload = json.loads(match.state_json or "{}")
+    viewer_seat = 1 if viewer_profile_id == match.player_one_profile_id else (2 if viewer_profile_id == match.player_two_profile_id else None)
+    player_two_username = match.player_two_profile.username if match.player_two_profile else (payload.get("computer_username") if payload.get("computer_opponent") else None)
     return PlaymodeMatchSummaryOut(
         public_id=match.public_id,
         mode=match.mode,
         status=match.status,
         current_turn=match.current_turn,
         active_seat=match.active_seat,
+        viewer_seat=viewer_seat,
+        needs_action=bool(match.status == "active" and viewer_seat and match.active_seat == viewer_seat),
         current_phase=str(payload.get("current_phase") or "untap"),
         deadline_label=playmode_deadline_label(match.turn_deadline_at),
         player_one_username=match.player_one_profile.username if match.player_one_profile else None,
-        player_two_username=match.player_two_profile.username if match.player_two_profile else None,
+        player_two_username=player_two_username,
         player_one_deck_title=match.player_one_deck.title if match.player_one_deck else None,
         player_two_deck_title=match.player_two_deck.title if match.player_two_deck else None,
     )
@@ -1972,6 +3368,7 @@ def playmode_match_view(match: PlayMatch, viewer_profile_id: int | None, db: Ses
     payload = json.loads(match.state_json)
     playmode_hydrate_state_cards(payload, db)
     viewer_seat = 1 if viewer_profile_id == match.player_one_profile_id else (2 if viewer_profile_id == match.player_two_profile_id else None)
+    player_two_username = match.player_two_profile.username if match.player_two_profile else (payload.get("computer_username") if payload.get("computer_opponent") else None)
     return PlaymodeMatchViewOut(
         public_id=match.public_id,
         mode=match.mode,
@@ -1979,6 +3376,9 @@ def playmode_match_view(match: PlayMatch, viewer_profile_id: int | None, db: Ses
         current_turn=match.current_turn,
         active_seat=match.active_seat,
         current_phase=str(payload.get("current_phase") or "untap"),
+        last_move_summary=payload.get("last_move_summary"),
+        event_log=list(payload.get("event_log") or [])[-80:],
+        pending_attack=payload.get("pending_attack"),
         pending_choice=playmode_pending_choice_view(payload, viewer_seat, admin_override),
         viewer_seat=viewer_seat,
         admin_override=admin_override,
@@ -1991,17 +3391,17 @@ def playmode_match_view(match: PlayMatch, viewer_profile_id: int | None, db: Ses
             deck_public_id=match.player_one_deck.public_id if match.player_one_deck else None,
             deck_title=match.player_one_deck.title if match.player_one_deck else None,
             ready=bool(payload.get("player_one", {}).get("ready")),
-            zones=playmode_zone_view(payload.get("player_one", {}), hide_hand=(viewer_seat != 1 and not admin_override)),
+            zones=playmode_zone_view(payload.get("player_one", {}), hide_hand=(viewer_seat != 1)),
         ),
         player_two=PlaymodePlayerViewOut(
             seat=2,
             profile_id=match.player_two_profile_id,
-            username=match.player_two_profile.username if match.player_two_profile else None,
-            avatar_url=match.player_two_profile.avatar_url if match.player_two_profile else None,
+            username=player_two_username,
+            avatar_url=match.player_two_profile.avatar_url if match.player_two_profile else ("/assets/shobu-cpu-avatar.png" if payload.get("computer_opponent") else None),
             deck_public_id=match.player_two_deck.public_id if match.player_two_deck else None,
             deck_title=match.player_two_deck.title if match.player_two_deck else None,
             ready=bool(payload.get("player_two", {}).get("ready")),
-            zones=playmode_zone_view(payload.get("player_two", {}), hide_hand=(viewer_seat != 2 and not admin_override)),
+            zones=playmode_zone_view(payload.get("player_two", {}), hide_hand=(viewer_seat != 2)),
         ),
     )
 
@@ -2053,15 +3453,10 @@ def render_page(filename: str) -> HTMLResponse:
     styles_url = f"/assets/styles.css?v={ASSET_VERSION}"
     app_url = f"/assets/app.js?v={ASSET_VERSION}"
     logo_url = f"/assets/assets/crystal-vault-logo.png?v={ASSET_VERSION}"
-    html = (
-        html
-        .replace('./styles.css?v=20260525d', styles_url)
-        .replace('./styles.css', styles_url)
-        .replace('./app.js?v=20260525d', app_url)
-        .replace('./app.js', app_url)
-        .replace('./assets/crystal-vault-logo.png', logo_url)
-        .replace('./assets/', '/assets/assets/')
-    )
+    html = re.sub(r'\./styles\.css(?:\?v=[^"]+)?', styles_url, html)
+    html = re.sub(r'\./app\.js(?:\?v=[^"]+)?', app_url, html)
+    html = html.replace('./assets/crystal-vault-logo.png', logo_url)
+    html = html.replace('./assets/', '/assets/assets/')
     if 'rel="icon"' not in html:
         html = html.replace(
             "</head>",
@@ -2208,6 +3603,18 @@ def rules_coverage(db: Session = Depends(get_db)) -> dict:
     return build_rules_coverage(cards)
 
 
+@app.get("/api/rules/spell-coverage")
+def spell_coverage(db: Session = Depends(get_db)) -> dict:
+    cards = db.scalars(select(Card).where(Card.type.ilike("%spell%")).order_by(Card.name.asc(), Card.id.asc())).all()
+    return build_spell_coverage(cards)
+
+
+@app.get("/api/rules/creature-coverage")
+def creature_coverage(db: Session = Depends(get_db)) -> dict:
+    cards = db.scalars(select(Card).where(Card.type.ilike("%creature%")).order_by(Card.name.asc(), Card.id.asc())).all()
+    return build_creature_coverage(cards)
+
+
 @app.get("/api/profiles", response_model=ProfileListResponse)
 def list_profiles(viewer_profile_id: int | None = None, db: Session = Depends(get_db)) -> ProfileListResponse:
     profiles = db.execute(
@@ -2215,6 +3622,7 @@ def list_profiles(viewer_profile_id: int | None = None, db: Session = Depends(ge
         .options(joinedload(Profile.follower_links), joinedload(Profile.following_links))
         .order_by(Profile.username.asc())
     ).unique().scalars().all()
+    profiles.sort(key=lambda profile: (-len(profile.follower_links), profile.username.lower(), profile.id))
     return ProfileListResponse(items=[profile_to_out(profile, viewer_profile_id=viewer_profile_id) for profile in profiles if profile])
 
 
@@ -2498,10 +3906,13 @@ def list_playmode_matches(profile_id: int, db: Session = Depends(get_db)) -> Pla
         )
         .order_by(PlayMatch.updated_at.desc(), PlayMatch.created_at.desc())
     )
-    if not profile.is_admin:
-        query = query.where((PlayMatch.player_one_profile_id == profile_id) | (PlayMatch.player_two_profile_id == profile_id))
+    query = query.where((PlayMatch.player_one_profile_id == profile_id) | (PlayMatch.player_two_profile_id == profile_id))
+    query = query.where(PlayMatch.status.in_(("active", "waiting")))
     matches = db.execute(query).unique().scalars().all()
-    return PlaymodeMatchListOut(items=[playmode_match_summary(match) for match in matches])
+    for match in matches:
+        maybe_run_computer_turn(match, db)
+        maybe_auto_resolve_playmode_match(match, db)
+    return PlaymodeMatchListOut(items=[playmode_match_summary(match, profile_id) for match in matches])
 
 
 @app.post("/api/playmode/matches", response_model=PlaymodeMatchViewOut)
@@ -2509,9 +3920,56 @@ def create_playmode_match(payload: PlaymodeMatchCreateIn, db: Session = Depends(
     profile = db.get(Profile, payload.profile_id)
     if not profile:
         raise HTTPException(status_code=404, detail="Profile not found.")
-    if payload.mode not in {"live", "async"}:
-        raise HTTPException(status_code=400, detail="Mode must be either live or async.")
+    if payload.mode not in {"live", "async", "computer"}:
+        raise HTTPException(status_code=400, detail="Mode must be live, async, or computer.")
     deck = ensure_owned_deck(db, payload.deck_public_id, payload.profile_id)
+    if payload.mode == "computer":
+        starting_seat = secrets.SystemRandom().choice([1, 2])
+        state_payload = build_playmode_match_state(deck, deck, starting_seat=starting_seat)
+        state_payload["computer_opponent"] = True
+        state_payload["computer_username"] = "Crystal CPU"
+        state_payload["last_move_summary"] = "Computer match started."
+        playmode_hydrate_state_cards(state_payload, db)
+        winner_seat = None
+        if starting_seat == 2:
+            messages, winner_seat = playmode_take_computer_turn(state_payload)
+            if messages:
+                state_payload["last_move_summary"] = " ".join(messages[-3:])
+                playmode_append_events(state_payload, messages)
+        if not winner_seat:
+            auto_messages, winner_seat = playmode_auto_resolve_mandatory_phases(state_payload)
+            if auto_messages:
+                state_payload["last_move_summary"] = " ".join(auto_messages[-3:])
+                playmode_append_events(state_payload, auto_messages)
+        match = PlayMatch(
+            public_id=generate_public_id(),
+            mode="computer",
+            status="finished" if winner_seat else "active",
+            player_one_profile_id=payload.profile_id,
+            player_one_deck_id=deck.id,
+            player_two_profile_id=None,
+            player_two_deck_id=deck.id,
+            active_seat=int(state_payload.get("active_seat") or 1),
+            current_turn=int(state_payload.get("current_turn") or 1),
+            winner_profile_id=payload.profile_id if winner_seat == 1 else None,
+            turn_deadline_at=None,
+            state_json=playmode_dump_state(state_payload),
+            created_at=datetime.utcnow(),
+            updated_at=datetime.utcnow(),
+        )
+        db.add(match)
+        db.commit()
+        loaded = db.scalar(
+            select(PlayMatch)
+            .where(PlayMatch.public_id == match.public_id)
+            .options(
+                joinedload(PlayMatch.player_one_profile),
+                joinedload(PlayMatch.player_two_profile),
+                joinedload(PlayMatch.player_one_deck),
+                joinedload(PlayMatch.player_two_deck),
+            )
+        )
+        return playmode_match_view(loaded, payload.profile_id, db, admin_override=bool(profile.is_admin))
     invited_profile = None
     invite_username = slugify(payload.invite_username or "")
     if invite_username:
@@ -2601,6 +4059,11 @@ def join_playmode_match(public_id: str, payload: PlaymodeMatchJoinIn, db: Sessio
             next_state["private_invite"] = True
             next_state["invited_profile_id"] = state_meta.get("invited_profile_id")
             next_state["invited_username"] = state_meta.get("invited_username")
+        auto_messages, _auto_winner = playmode_auto_resolve_mandatory_phases(next_state)
+        playmode_append_event(next_state, f"Player 2 joined. Player {starting_seat} starts.")
+        playmode_append_events(next_state, auto_messages)
+        match.active_seat = int(next_state.get("active_seat") or starting_seat)
+        match.current_turn = int(next_state.get("current_turn") or 1)
         match.state_json = playmode_dump_state(next_state)
         match.turn_deadline_at = datetime.utcnow() + timedelta(hours=24) if match.mode == "async" else None
         match.updated_at = datetime.utcnow()
@@ -2633,15 +4096,81 @@ def get_playmode_match(public_id: str, profile_id: int | None = None, db: Sessio
     )
     if not match:
         raise HTTPException(status_code=404, detail="Match not found.")
+    maybe_run_computer_turn(match, db)
+    maybe_auto_resolve_playmode_match(match, db)
     state_meta = json.loads(match.state_json or "{}")
     if viewer_profile and viewer_profile.is_admin:
         return playmode_match_view(match, profile_id, db, admin_override=True)
+    if playmode_spectator_allows(state_meta, viewer_profile, match=match):
+        return playmode_match_view(match, profile_id, db)
     if not playmode_invite_allows(state_meta, profile_id, match=match):
         raise HTTPException(status_code=403, detail="This private match can only be viewed by invited players.")
     invited_profile_id = state_meta.get("invited_profile_id")
     if profile_id and profile_id not in {match.player_one_profile_id, match.player_two_profile_id, invited_profile_id}:
         raise HTTPException(status_code=403, detail="You do not have access to this match.")
     return playmode_match_view(match, profile_id, db)
+
+
+@app.post("/api/playmode/matches/{public_id}/spectate-invites", response_model=GenericMessageOut)
+def invite_playmode_spectator(public_id: str, payload: PlaymodeSpectateInviteIn, db: Session = Depends(get_db)) -> GenericMessageOut:
+    actor = db.get(Profile, payload.profile_id)
+    if not actor:
+        raise HTTPException(status_code=404, detail="Profile not found.")
+    match = db.scalar(
+        select(PlayMatch)
+        .where(PlayMatch.public_id == public_id)
+        .options(
+            joinedload(PlayMatch.player_one_profile),
+            joinedload(PlayMatch.player_two_profile),
+            joinedload(PlayMatch.player_one_deck),
+            joinedload(PlayMatch.player_two_deck),
+        )
+    )
+    if not match:
+        raise HTTPException(status_code=404, detail="Match not found.")
+    if match.status != "active":
+        raise HTTPException(status_code=400, detail="Spectators can only be invited after the match is active.")
+    if not actor.is_admin and payload.profile_id not in {match.player_one_profile_id, match.player_two_profile_id}:
+        raise HTTPException(status_code=403, detail="Only players in this match can invite spectators.")
+    raw_target = payload.invite_to.strip()
+    if not raw_target:
+        raise HTTPException(status_code=400, detail="Choose a user or enter an email address.")
+    target_profile = find_invited_profile(db, raw_target)
+    target_email = normalize_email(raw_target) if "@" in raw_target else None
+    state_payload = json.loads(match.state_json or "{}")
+    now = datetime.utcnow()
+    if target_profile:
+        if target_profile.id in {match.player_one_profile_id, match.player_two_profile_id}:
+            raise HTTPException(status_code=400, detail="That user is already playing in this match.")
+        spectator_ids = {int(value) for value in state_payload.get("spectator_profile_ids", []) if str(value).isdigit()}
+        spectator_ids.add(target_profile.id)
+        state_payload["spectator_profile_ids"] = sorted(spectator_ids)
+        db.add(Notification(
+            profile_id=target_profile.id,
+            actor_profile_id=actor.id,
+            type="playmode_spectate",
+            message=f"{actor.username} invited you to spectate Playmode match {match.public_id}.",
+            created_at=now,
+        ))
+        recipient_email = target_profile.email
+        recipient_name = target_profile.username
+    elif target_email:
+        spectator_emails = {normalize_email(value) for value in state_payload.get("spectator_emails", []) if value}
+        spectator_emails.add(target_email)
+        state_payload["spectator_emails"] = sorted(spectator_emails)
+        recipient_email = target_email
+        recipient_name = target_email
+    else:
+        raise HTTPException(status_code=404, detail="User was not found. Use a followed user, username, or email address.")
+    match.state_json = playmode_dump_state(state_payload)
+    match.updated_at = now
+    db.commit()
+    if recipient_email:
+        try:
+            send_email_message(build_playmode_spectate_message(recipient_email=recipient_email, recipient_name=recipient_name, actor=actor, match=match))
+        except Exception as error:
+            logger.exception("Playmode spectate invite email failed: %s", error)
+    return GenericMessageOut(status="ok", message=f"Spectate invite sent to {recipient_name}.")
 
 
 @app.post("/api/playmode/matches/{public_id}/action", response_model=PlaymodeMatchViewOut)
@@ -2682,7 +4211,32 @@ def apply_playmode_action(public_id: str, payload: PlaymodeActionIn, db: Session
     if not is_admin_override and match.active_seat != mover_seat and not can_resolve_pending and payload.action != "concede":
         raise HTTPException(status_code=403, detail="It is not your turn.")
     move_summary, winner_seat = playmode_apply_action(state_payload, payload)
+    if winner_seat is None:
+        auto_messages, auto_winner = playmode_auto_resolve_mandatory_phases(state_payload)
+        if auto_messages:
+            move_summary = f"{move_summary} {' '.join(auto_messages[-3:])}"
+        winner_seat = auto_winner
+    computer_choice_messages: list[str] = []
+    computer_choice_steps = 0
+    while match.mode == "computer" and winner_seat is None and int((state_payload.get("pending_choice") or {}).get("controller_seat") or 0) == 2 and computer_choice_steps < 6:
+        computer_choice_steps += 1
+        computer_messages, computer_winner = playmode_resolve_computer_pending_choice(state_payload)
+        computer_choice_messages.extend(computer_messages)
+        winner_seat = computer_winner
+    if computer_choice_messages:
+        move_summary = f"{move_summary} {' '.join(computer_choice_messages[-3:])}"
+    if match.mode == "computer" and winner_seat is None and int(state_payload.get("active_seat") or match.active_seat or 1) == 2:
+        computer_messages, computer_winner = playmode_take_computer_turn(state_payload)
+        if computer_messages:
+            move_summary = f"{move_summary} {' '.join(computer_messages[-3:])}"
+        winner_seat = computer_winner
+        if winner_seat is None:
+            auto_messages, auto_winner = playmode_auto_resolve_mandatory_phases(state_payload)
+            if auto_messages:
+                move_summary = f"{move_summary} {' '.join(auto_messages[-3:])}"
+        winner_seat = auto_winner
     state_payload["last_move_summary"] = move_summary
+    playmode_append_event(state_payload, move_summary)
     now = datetime.utcnow()
     match.current_turn = int(state_payload.get("current_turn") or match.current_turn or 1)
     match.active_seat = int(state_payload.get("active_seat") or match.active_seat or 1)
@@ -2779,6 +4333,9 @@ def update_playmode_match(public_id: str, payload: PlaymodeMatchUpdateIn, db: Se
     state_payload["current_phase"] = payload.current_phase
     state_payload["current_turn"] = payload.current_turn
     state_payload["active_seat"] = payload.active_seat
+    if payload.move_summary:
+        state_payload["last_move_summary"] = payload.move_summary
+        playmode_append_event(state_payload, payload.move_summary)
     match.current_turn = payload.current_turn
     match.active_seat = payload.active_seat
     match.updated_at = now
@@ -3396,7 +4953,16 @@ def list_decks(viewer_profile_id: int | None = None, db: Session = Depends(get_d
         .order_by(Deck.updated_at.desc(), Deck.created_at.desc())
     ).unique().scalars().all()
 
-    items = [deck_summary_out(deck, viewer_profile_id=viewer_profile_id) for deck in decks if deck.visibility == "public"]
+    public_decks = [deck for deck in decks if deck.visibility == "public"]
+    public_decks.sort(
+        key=lambda deck: (
+            -len(deck.likes),
+            -((deck.updated_at or deck.created_at or datetime.min).timestamp()),
+            deck.title.lower(),
+            deck.id,
+        )
+    )
+    items = [deck_summary_out(deck, viewer_profile_id=viewer_profile_id) for deck in public_decks]
     return DeckListResponse(items=items)
 
 

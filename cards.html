@@ -47,9 +47,30 @@
         <h1>Browse the Duel Masters catalog</h1>
         <p class="hero-text">Use Paladin's Vault as a searchable card database, then jump back into deck building when you find what you need.</p>
       </div>
+      <div class="explore-controls">
+        <label class="field explore-type-field">
+          <span>Explore Type</span>
+          <select id="explore-type-select">
+            <option value="decks">Decks</option>
+            <option value="users">Users</option>
+            <option value="cards">Cards</option>
+          </select>
+        </label>
+      </div>
     </header>
 
     <main class="page-stack">
+      <section id="card-of-day-panel" class="panel card-of-day-panel" hidden>
+        <div class="panel-header">
+          <div>
+            <p class="section-label">Daily Spotlight</p>
+            <h2>Card of the Day</h2>
+          </div>
+          <a class="ghost-button" href="/builder/editor">Build with it</a>
+        </div>
+        <div id="card-of-day-card"></div>
+      </section>
+
       <section class="panel catalog-panel">
         <div class="panel-header">
           <div>
