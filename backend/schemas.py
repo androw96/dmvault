@@ -85,14 +85,32 @@ class AuthLoginIn(BaseModel):
 
 class AuthResponse(BaseModel):
     profile: ProfileOut
+    auth_token: str | None = None
+    csrf_token: str | None = None
+    admin_2fa_required: bool = False
+    admin_2fa_challenge_id: str | None = None
     verification_required: bool = False
     verification_email_sent: bool = False
     message: str | None = None
     verification_url: str | None = None
 
 
+class AdminTwoFactorVerifyIn(BaseModel):
+    challenge_id: str
+    code: str
+
+
 class VerificationResendIn(BaseModel):
     email: str
+
+
+class PasswordResetRequestIn(BaseModel):
+    email: str
+
+
+class PasswordResetConfirmIn(BaseModel):
+    token: str
+    password: str
 
 
 class GenericMessageOut(BaseModel):

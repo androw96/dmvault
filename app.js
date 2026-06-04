@@ -3,6 +3,8 @@ const LOCAL_STORAGE_KEY = "paladins-vault-local-deck";
 const PLAYTEST_STORAGE_KEY = "paladins-vault-playtest-session";
 const PLAYTEST_STORAGE_BACKUP_KEY = "paladins-vault-playtest-session-backup";
 const PROFILE_STORAGE_KEY = "paladins-vault-active-profile";
+const AUTH_TOKEN_STORAGE_KEY = "paladins-vault-auth-token";
+const CSRF_TOKEN_STORAGE_KEY = "paladins-vault-csrf-token";
 const BUILDER_PREFS_KEY = "paladins-vault-builder-prefs";
 const COOKIE_CONSENT_KEY = "paladins-vault-cookie-consent";
 const DEFAULT_LOGO_URL = "/assets/assets/crystal-vault-logo.png";
@@ -108,6 +110,8 @@ const state = {
   builderModifyOpen: false,
   historyOpen: false,
   avatarPickerTarget: null,
+  avatarPickerOriginalValue: "",
+  avatarPickerSaved: false,
   deckOwnerId: null,
   loadedDeckOwner: null,
   loadedDeckLikeCount: 0,
@@ -250,12 +254,14 @@ const elements = {
   avatarPickerModal: document.querySelector("#avatar-picker-modal"),
   avatarPickerBrowser: document.querySelector("#avatar-picker-browser"),
   closeAvatarPicker: document.querySelector("#close-avatar-picker"),
+  saveAvatarPicker: document.querySelector("#save-avatar-picker"),
   closeAvatarModalTargets: [...document.querySelectorAll("[data-close-avatar-modal]")],
   authModal: document.querySelector("#auth-modal"),
   closeAuthModal: document.querySelector("#close-auth-modal"),
   closeAuthModalTargets: [...document.querySelectorAll("[data-close-auth-modal]")],
   openAuthModalButtons: [...document.querySelectorAll("[data-open-auth-modal]")],
   resendVerificationButton: document.querySelector("#resend-verification-button"),
+  forgotPasswordButton: null,
   signupModal: document.querySelector("#signup-modal"),
   closeSignupModal: document.querySelector("#close-signup-modal"),
   closeSignupModalTargets: [...document.querySelectorAll("[data-close-signup-modal]")],
@@ -634,6 +640,7 @@ async function initialize() {
   primeCachedProfileState();
   renderInitialPageShell();
   bindEvents();
+  void maybeHandlePasswordResetLink();
   if (isPlaymodePage && PLAYMODE_PUBLIC_COMING_SOON) {
     renderPlaymodeConstructionPage();
     setBootLoadingState(false);
@@ -3841,7 +3848,7 @@ function ensureNotificationMenu() {
 
 function ensureAdminMenuLinks() {
   const loggedInProfile = activeProfile();
-  const isAdmin = Boolean(loggedInProfile?.is_admin);
+  const isAdmin = Boolean(hasAuthSession() && loggedInProfile?.is_admin);
   const navLinks = document.querySelector(".top-nav-links");
   for (const menu of document.querySelectorAll(".profile-dropdown-menu")) {
     const existing = menu.querySelector("[data-admin-menu-link]");
@@ -4057,6 +4064,7 @@ function bindEvents() {
   elements.openRegisterAvatarPicker?.addEventListener("click", () => openAvatarPicker("register"));
   elements.openProfileAvatarPicker?.addEventListener("click", () => openAvatarPicker("profile"));
   elements.closeAvatarPicker?.addEventListener("click", closeAvatarPickerModal);
+  elements.saveAvatarPicker?.addEventListener("click", saveAvatarPickerSelection);
   for (const target of elements.closeAvatarModalTargets) {
     target.addEventListener("click", closeAvatarPickerModal);
   }
@@ -4416,12 +4424,17 @@ function promptRenameDeckTitle() {
 async function hydrateProfiles() {
   const storedId = Number(window.localStorage.getItem(PROFILE_STORAGE_KEY));
   const params = new URLSearchParams();
-  if (storedId) {
+  if (storedId && hasAuthSession()) {
     params.set("viewer_profile_id", String(storedId));
   }
   const payload = await fetchJson(`${API_BASE}/profiles${params.toString() ? `?${params.toString()}` : ""}`);
   state.profiles = payload.items;
-  state.activeProfileId = state.profiles.some((profile) => profile.id === storedId) ? storedId : null;
+  state.activeProfileId = hasAuthSession() && state.profiles.some((profile) => profile.id === storedId) ? storedId : null;
+  if (!state.activeProfileId) {
+    window.localStorage.removeItem(PROFILE_STORAGE_KEY);
+    window.localStorage.removeItem(PROFILE_CACHE_KEY);
+    window.localStorage.removeItem(PROFILE_DECKS_CACHE_KEY);
+  }
   persistActiveProfileCache();
 }
 
@@ -4535,7 +4548,7 @@ async function loadNotifications() {
 }
 
 async function loadAdminOverview() {
-  if (!state.activeProfileId || !activeProfile()?.is_admin) {
+  if (!state.activeProfileId || !hasAuthSession() || !activeProfile()?.is_admin) {
     state.adminOverview = null;
     return;
   }
@@ -5431,7 +5444,7 @@ function closeAdminMonthModal() {
 }
 
 async function openAdminMonthModal(label) {
-  if (!state.activeProfileId || !activeProfile()?.is_admin) {
+  if (!state.activeProfileId || !hasAuthSession() || !activeProfile()?.is_admin) {
     return;
   }
   ensureAdminMonthModal();
@@ -5680,7 +5693,7 @@ function renderAdminPage() {
     return;
   }
   const loggedInProfile = activeProfile();
-  const isAdmin = Boolean(loggedInProfile?.is_admin);
+  const isAdmin = Boolean(hasAuthSession() && loggedInProfile?.is_admin);
   if (elements.adminDenied) {
     elements.adminDenied.hidden = isAdmin;
   }
@@ -6312,13 +6325,38 @@ function renderAvatarPreview(container, input) {
 }
 
 function activeAvatarPickerInput() {
-  return state.avatarPickerTarget === "profile" ? elements.profileAvatarUrlInput : elements.registerAvatarUrl;
+  if (state.avatarPickerTarget === "profile") {
+    return elements.profileAvatarUrlInput;
+  }
+  if (state.avatarPickerTarget === "register") {
+    return elements.registerAvatarUrl;
+  }
+  return null;
 }
 
 function updateAvatarPresetSelectionStates(value) {
   for (const button of document.querySelectorAll(".avatar-preset-card")) {
     button.classList.toggle("is-selected", button.dataset.avatarValue === value);
+    button.classList.toggle("is-in-use", button.dataset.avatarValue === state.avatarPickerOriginalValue);
   }
+  updateAvatarPickerSaveButton();
+}
+
+function updateAvatarPickerSaveButton() {
+  if (!elements.saveAvatarPicker) {
+    return;
+  }
+  if (!state.avatarPickerTarget) {
+    elements.saveAvatarPicker.hidden = true;
+    elements.saveAvatarPicker.disabled = true;
+    return;
+  }
+  const input = activeAvatarPickerInput();
+  const currentValue = input?.value || "";
+  const hasChanged = currentValue !== (state.avatarPickerOriginalValue || "");
+  elements.saveAvatarPicker.hidden = !hasChanged;
+  elements.saveAvatarPicker.disabled = !hasChanged;
+  elements.saveAvatarPicker.textContent = state.avatarPickerTarget === "profile" ? "Save" : "Use Portrait";
 }
 
 function previewAvatarPresetSelection(avatarValue) {
@@ -6336,11 +6374,7 @@ function previewAvatarPresetSelection(avatarValue) {
 
 async function confirmAvatarPresetSelection(avatarValue) {
   previewAvatarPresetSelection(avatarValue);
-  if (state.avatarPickerTarget === "profile" && state.activeProfileId) {
-    applyLocalAvatarUpdate(avatarValue || null);
-    await saveProfileAvatar(avatarValue || null, { silent: true });
-  }
-  closeAvatarPickerModal();
+  await saveAvatarPickerSelection();
 }
 
 function renderAvatarPickerBrowser() {
@@ -6374,6 +6408,7 @@ function renderAvatarPickerBrowser() {
       const avatarValue = buildAvatarPresetValue(card, name);
       button.dataset.avatarValue = avatarValue || "";
       button.classList.toggle("is-selected", input.value === avatarValue);
+      button.classList.toggle("is-in-use", (avatarValue || "") === state.avatarPickerOriginalValue);
       button.style.setProperty("--avatar-accent", avatarCivilizationAccent(civilization));
       button.innerHTML = `
         <span class="avatar-in-use-badge">In Use</span>
@@ -6521,16 +6556,54 @@ function setAvatarArt(element, url, options = {}) {
 
 function openAvatarPicker(target) {
   state.avatarPickerTarget = target;
+  state.avatarPickerOriginalValue = activeAvatarPickerInput()?.value || "";
+  state.avatarPickerSaved = false;
   renderAvatarPickerBrowser();
+  updateAvatarPickerSaveButton();
   if (elements.avatarPickerModal) {
     elements.avatarPickerModal.hidden = false;
   }
 }
 
 function closeAvatarPickerModal() {
+  if (!state.avatarPickerSaved) {
+    const input = activeAvatarPickerInput();
+    if (input) {
+      input.value = state.avatarPickerOriginalValue || "";
+      renderAvatarPreview(
+        state.avatarPickerTarget === "profile" ? elements.profileAvatarPreview : elements.registerAvatarPreview,
+        input
+      );
+    }
+  }
   if (elements.avatarPickerModal) {
     elements.avatarPickerModal.hidden = true;
   }
+  state.avatarPickerTarget = null;
+  state.avatarPickerOriginalValue = "";
+  state.avatarPickerSaved = false;
+  updateAvatarPickerSaveButton();
+}
+
+async function saveAvatarPickerSelection() {
+  const input = activeAvatarPickerInput();
+  if (!input) {
+    return;
+  }
+  const avatarValue = input.value || "";
+  if (state.avatarPickerTarget === "profile") {
+    if (!state.activeProfileId) {
+      setStatus("Log in first to update your profile image.", "error");
+      return;
+    }
+    const saved = await saveProfileAvatar(avatarValue || null);
+    if (!saved) {
+      return;
+    }
+  }
+  state.avatarPickerOriginalValue = avatarValue;
+  state.avatarPickerSaved = true;
+  closeAvatarPickerModal();
 }
 
 function openAuthModal() {
@@ -6622,7 +6695,7 @@ function ensureAuthModalEnhancements() {
   elements.authModalStatus = ensureStatusNode(elements.authModal, "auth-modal-status");
   elements.signupModalStatus = ensureStatusNode(elements.signupModal, "signup-modal-status");
 
-  if (elements.resendVerificationButton && elements.loginSignupShortcutButton) {
+  if (elements.resendVerificationButton && elements.loginSignupShortcutButton && elements.forgotPasswordButton) {
     return;
   }
   const loginButton = elements.loginButton;
@@ -6641,6 +6714,15 @@ function ensureAuthModalEnhancements() {
   signupButton.addEventListener("click", openSignupModal);
   actionRow.append(signupButton);
   elements.loginSignupShortcutButton = signupButton;
+
+  const forgotButton = document.createElement("button");
+  forgotButton.type = "button";
+  forgotButton.id = "forgot-password-button";
+  forgotButton.className = "ghost-button";
+  forgotButton.textContent = "Forgot Password";
+  forgotButton.addEventListener("click", requestPasswordResetEmail);
+  actionRow.append(forgotButton);
+  elements.forgotPasswordButton = forgotButton;
 
   const button = document.createElement("button");
   button.type = "button";
@@ -6661,6 +6743,10 @@ function setLoginModalAuxActions(showResend = false) {
   if (elements.loginSignupShortcutButton) {
     elements.loginSignupShortcutButton.hidden = showResend;
     elements.loginSignupShortcutButton.style.display = showResend ? "none" : "";
+  }
+  if (elements.forgotPasswordButton) {
+    elements.forgotPasswordButton.hidden = showResend;
+    elements.forgotPasswordButton.style.display = showResend ? "none" : "";
   }
 }
 
@@ -8574,6 +8660,15 @@ async function createProfile() {
   }
 
   await hydrateProfiles();
+  if (payload.auth_token && payload.profile?.id) {
+    state.activeProfileId = payload.profile.id;
+    window.localStorage.setItem(PROFILE_STORAGE_KEY, String(payload.profile.id));
+    window.localStorage.removeItem(AUTH_TOKEN_STORAGE_KEY);
+    if (payload.csrf_token) {
+      window.localStorage.setItem(CSRF_TOKEN_STORAGE_KEY, payload.csrf_token);
+    }
+    persistActiveProfileCache();
+  }
   if (elements.newProfileName) elements.newProfileName.value = "";
   if (elements.registerEmail) elements.registerEmail.value = "";
   if (elements.registerAvatarUrl) elements.registerAvatarUrl.value = "";
@@ -8621,8 +8716,34 @@ async function loginProfile() {
     setStatus(error.message || "Login failed.", "error");
     return;
   }
+  if (payload.admin_2fa_required) {
+    const code = window.prompt("Admin security code sent to your email. Enter the 6-digit code:");
+    if (!code) {
+      setAuthModalStatus("Admin login needs the security code from your email.", "error", null, "login");
+      setStatus("Admin login cancelled before 2FA confirmation.", "error");
+      return;
+    }
+    try {
+      payload = await fetchJson(`${API_BASE}/auth/admin-2fa/verify`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          challenge_id: payload.admin_2fa_challenge_id,
+          code
+        })
+      });
+    } catch (error) {
+      setAuthModalStatus(error.message || "Admin security code failed.", "error", null, "login");
+      setStatus(error.message || "Admin security code failed.", "error");
+      return;
+    }
+  }
   state.activeProfileId = payload.profile.id;
   window.localStorage.setItem(PROFILE_STORAGE_KEY, String(payload.profile.id));
+  window.localStorage.removeItem(AUTH_TOKEN_STORAGE_KEY);
+  if (payload.csrf_token) {
+    window.localStorage.setItem(CSRF_TOKEN_STORAGE_KEY, payload.csrf_token);
+  }
   await hydrateProfiles();
   persistActiveProfileCache();
   await loadNotifications();
@@ -8680,7 +8801,64 @@ async function resendVerificationEmail() {
   );
 }
 
+async function requestPasswordResetEmail() {
+  const email = elements.loginEmail?.value.trim() || elements.registerEmail?.value.trim() || "";
+  if (!email) {
+    setAuthModalStatus("Enter your email first, then request a password reset.", "error", null, "login");
+    setStatus("Enter your email first, then request a password reset.", "error");
+    return;
+  }
+  let payload;
+  try {
+    payload = await fetchJson(`${API_BASE}/auth/password-reset/request`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email })
+    });
+  } catch (error) {
+    setAuthModalStatus(error.message || "Password reset request failed.", "error", null, "login");
+    setStatus(error.message || "Password reset request failed.", "error");
+    return;
+  }
+  const level = payload.status === "error" ? "error" : "success";
+  setAuthModalStatus(payload.message || "If the account exists, a password reset email has been sent.", level, null, "login");
+  setStatus(payload.message || "If the account exists, a password reset email has been sent.", level);
+}
+
+async function maybeHandlePasswordResetLink() {
+  const params = new URLSearchParams(window.location.search);
+  const token = params.get("reset_token");
+  if (!token) {
+    return;
+  }
+  const password = window.prompt("Enter your new Paladin's Vault password:");
+  if (!password) {
+    setStatus("Password reset cancelled.", "error");
+    return;
+  }
+  try {
+    const payload = await fetchJson(`${API_BASE}/auth/password-reset/confirm`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token, password })
+    });
+    window.localStorage.removeItem(PROFILE_STORAGE_KEY);
+    window.localStorage.removeItem(AUTH_TOKEN_STORAGE_KEY);
+    window.localStorage.removeItem(CSRF_TOKEN_STORAGE_KEY);
+    window.localStorage.removeItem(PROFILE_CACHE_KEY);
+    window.localStorage.removeItem(PROFILE_DECKS_CACHE_KEY);
+    params.delete("reset_token");
+    const nextSearch = params.toString();
+    window.history.replaceState({}, "", `${window.location.pathname}${nextSearch ? `?${nextSearch}` : ""}${window.location.hash}`);
+    setStatus(payload.message || "Password updated. Please log in again.", "success");
+    openAuthModal();
+  } catch (error) {
+    setStatus(error.message || "Password reset failed.", "error");
+  }
+}
+
 function logoutProfile() {
+  void fetchJson(`${API_BASE}/auth/logout`, { method: "POST" }).catch(() => {});
   state.hasUnsavedProfileChanges = false;
   state.autosaveInFlight = false;
   state.autosaveQueued = false;
@@ -8692,6 +8870,8 @@ function logoutProfile() {
   state.profileDecks = [];
   state.deckReadOnly = Boolean(state.deckOwnerId);
   window.localStorage.removeItem(PROFILE_STORAGE_KEY);
+  window.localStorage.removeItem(AUTH_TOKEN_STORAGE_KEY);
+  window.localStorage.removeItem(CSRF_TOKEN_STORAGE_KEY);
   window.localStorage.removeItem(PROFILE_CACHE_KEY);
   window.localStorage.removeItem(PROFILE_DECKS_CACHE_KEY);
   renderBuilderDeckOptions();
@@ -8766,7 +8946,7 @@ async function saveProfileBio() {
 }
 
 async function sendAdminNotification() {
-  if (!state.activeProfileId || !activeProfile()?.is_admin) {
+  if (!state.activeProfileId || !hasAuthSession() || !activeProfile()?.is_admin) {
     setStatus("Admin access is required.", "error");
     return;
   }
@@ -8798,7 +8978,7 @@ async function sendAdminNotification() {
 }
 
 async function sendAdminEmail() {
-  if (!state.activeProfileId || !activeProfile()?.is_admin) {
+  if (!state.activeProfileId || !hasAuthSession() || !activeProfile()?.is_admin) {
     setStatus("Admin account required.", "error");
     return;
   }
@@ -8849,7 +9029,7 @@ async function sendAdminEmail() {
 }
 
 async function verifyAdminUser(profileId) {
-  if (!state.activeProfileId || !activeProfile()?.is_admin) {
+  if (!state.activeProfileId || !hasAuthSession() || !activeProfile()?.is_admin) {
     setStatus("Admin access is required.", "error");
     return;
   }
@@ -8873,7 +9053,7 @@ async function verifyAdminUser(profileId) {
 }
 
 async function toggleAdminBan(profileId, banned, reason = "") {
-  if (!state.activeProfileId || !activeProfile()?.is_admin) {
+  if (!state.activeProfileId || !hasAuthSession() || !activeProfile()?.is_admin) {
     setStatus("Admin access is required.", "error");
     return;
   }
@@ -8904,7 +9084,7 @@ async function saveProfileAvatar(nextAvatarUrl = null, options = {}) {
     if (!silent) {
       setStatus("Log in first to update your profile image.", "error");
     }
-    return;
+    return false;
   }
   const avatarUrl = typeof nextAvatarUrl === "string" || nextAvatarUrl === null
     ? nextAvatarUrl
@@ -8920,7 +9100,7 @@ async function saveProfileAvatar(nextAvatarUrl = null, options = {}) {
     if (!silent) {
       setStatus(error.message || "Profile image update failed.", "error");
     }
-    return;
+    return false;
   }
   if (elements.profileAvatarUrlInput) {
     elements.profileAvatarUrlInput.value = payload.avatar_url || "";
@@ -8930,6 +9110,7 @@ async function saveProfileAvatar(nextAvatarUrl = null, options = {}) {
   if (!silent) {
     setStatus("Profile image saved.", "success");
   }
+  return true;
 }
 
 function persistDeckSnapshot() {
@@ -8967,10 +9148,14 @@ function cachedActiveProfile() {
 
 function primeCachedProfileState() {
   const storedId = Number(window.localStorage.getItem(PROFILE_STORAGE_KEY));
-  if (storedId && !state.activeProfileId) {
+  if (storedId && hasAuthSession() && !state.activeProfileId) {
     state.activeProfileId = storedId;
+  } else if (storedId && !hasAuthSession()) {
+    window.localStorage.removeItem(PROFILE_STORAGE_KEY);
+    window.localStorage.removeItem(PROFILE_CACHE_KEY);
+    window.localStorage.removeItem(PROFILE_DECKS_CACHE_KEY);
   }
-  primeCachedProfileDecks(storedId);
+  primeCachedProfileDecks(hasAuthSession() ? storedId : 0);
 }
 
 function persistActiveProfileCache() {
@@ -9145,8 +9330,39 @@ function setTextImportStatus(message, type = "info") {
   }
 }
 
-async function fetchJson(url, options) {
-  const response = await fetch(url, options);
+function authToken() {
+  return window.localStorage.getItem(AUTH_TOKEN_STORAGE_KEY) || "";
+}
+
+function hasAuthSession() {
+  return Boolean(authToken() || csrfToken());
+}
+
+function csrfToken() {
+  const stored = window.localStorage.getItem(CSRF_TOKEN_STORAGE_KEY);
+  if (stored) {
+    return stored;
+  }
+  const cookie = document.cookie
+    .split("; ")
+    .find((part) => part.startsWith("pv_csrf="));
+  return cookie ? decodeURIComponent(cookie.split("=").slice(1).join("=")) : "";
+}
+
+async function fetchJson(url, options = {}) {
+  const requestOptions = { ...options };
+  const headers = new Headers(requestOptions.headers || {});
+  const token = authToken();
+  if (token && !headers.has("Authorization")) {
+    headers.set("Authorization", `Bearer ${token}`);
+  }
+  const method = String(requestOptions.method || "GET").toUpperCase();
+  const csrf = csrfToken();
+  if (csrf && !["GET", "HEAD", "OPTIONS"].includes(method) && !headers.has("X-CSRF-Token")) {
+    headers.set("X-CSRF-Token", csrf);
+  }
+  requestOptions.headers = headers;
+  const response = await fetch(url, requestOptions);
   if (!response.ok) {
     let detail = `Request failed: ${response.status}`;
     try {

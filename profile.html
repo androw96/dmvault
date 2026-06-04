@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=Cormorant+Garamond:wght@600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="./styles.css?v=20260521c">
+  <link rel="stylesheet" href="./styles.css?v=20260603avatarsave">
 </head>
 <body data-page="profile">
   <div class="page-shell">
@@ -164,7 +164,10 @@
           <p class="section-label">Choose Portrait</p>
           <h2>Duel Masters Profile Pictures</h2>
         </div>
-        <button id="close-avatar-picker" type="button" class="ghost-button">Close</button>
+        <div class="avatar-picker-actions">
+          <button id="close-avatar-picker" type="button" class="ghost-button">Close</button>
+          <button id="save-avatar-picker" type="button" class="primary-button avatar-picker-save-button" hidden disabled>Save</button>
+        </div>
       </div>
       <div id="avatar-picker-browser" class="avatar-preset-browser"></div>
     </section>
@@ -225,6 +228,6 @@
       </div>
     </section>
   </div>
-  <script src="./app.js?v=20260521c"></script>
+  <script src="./app.js?v=20260603avatarsave"></script>
 </body>
 </html>

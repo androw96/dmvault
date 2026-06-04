@@ -167,6 +167,19 @@ class EmailVerificationToken(Base):
     profile: Mapped[Profile] = relationship(back_populates="verification_tokens")
 
 
+class PasswordResetToken(Base):
+    __tablename__ = "password_reset_tokens"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    profile_id: Mapped[int] = mapped_column(ForeignKey("profiles.id", ondelete="CASCADE"), index=True)
+    token_hash: Mapped[str] = mapped_column(String(128), unique=True, index=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+    used_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, index=True)
+
+    profile: Mapped[Profile] = relationship()
+
+
 class Notification(Base):
     __tablename__ = "notifications"
 

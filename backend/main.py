@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import base64
 from datetime import datetime
 from datetime import timedelta
+import hmac
 import hashlib
 import json
 import logging
@@ -25,7 +27,7 @@ from sqlalchemy.orm import Session, joinedload, selectinload
 
 from .database import BASE_DIR, SessionLocal
 from .image_service import ensure_card_image
-from .models import AdminAuditLog, Card, ContactMessage, Deck, DeckItem, DeckLike, DeckRevision, EmailVerificationToken, Notification, PlayMatch, Profile, ProfileFollow
+from .models import AdminAuditLog, Card, ContactMessage, Deck, DeckItem, DeckLike, DeckRevision, EmailVerificationToken, Notification, PasswordResetToken, PlayMatch, Profile, ProfileFollow
 from .pdf_service import build_deck_pdf
 from .rules_engine import build_creature_coverage, build_rules_coverage, build_spell_coverage
 from .schemas import (
@@ -36,6 +38,7 @@ from .schemas import (
     AdminMonthProfileOut,
     AdminNotificationIn,
     AdminOverviewOut,
+    AdminTwoFactorVerifyIn,
     AdminVerifyIn,
     AuthLoginIn,
     AuthRegisterIn,
@@ -59,6 +62,8 @@ from .schemas import (
     MonthlyStatOut,
     NotificationListResponse,
     NotificationOut,
+    PasswordResetConfirmIn,
+    PasswordResetRequestIn,
     PlaymodeActionIn,
     PlaymodeCardViewOut,
     PlaymodeMatchCreateIn,
@@ -94,20 +99,32 @@ SMTP_FROM_EMAIL = os.getenv("SMTP_FROM_EMAIL", "").strip()
 SMTP_USE_TLS = os.getenv("SMTP_USE_TLS", "1").strip() != "0"
 EMAIL_VERIFICATION_TTL_HOURS = int(os.getenv("EMAIL_VERIFICATION_TTL_HOURS", "24"))
 EMAIL_RESEND_COOLDOWN_SECONDS = int(os.getenv("EMAIL_RESEND_COOLDOWN_SECONDS", "60"))
+PASSWORD_RESET_TTL_MINUTES = int(os.getenv("PASSWORD_RESET_TTL_MINUTES", "30"))
 DEFAULT_ADMIN_EMAIL = os.getenv("DEFAULT_ADMIN_EMAIL", "admin@paladinsvault.com").strip().lower()
 DEFAULT_ADMIN_USERNAME = slugify(os.getenv("DEFAULT_ADMIN_USERNAME", "paladins-vault-admin"))
-DEFAULT_ADMIN_PASSWORD = os.getenv("DEFAULT_ADMIN_PASSWORD", "PaladinsVaultAdmin96")
+DEFAULT_ADMIN_PASSWORD_ENV = os.getenv("DEFAULT_ADMIN_PASSWORD")
+DEFAULT_ADMIN_PASSWORD = DEFAULT_ADMIN_PASSWORD_ENV or secrets.token_urlsafe(32)
+ALLOW_DEFAULT_ADMIN_BOOTSTRAP = os.getenv("ALLOW_DEFAULT_ADMIN_BOOTSTRAP", "").strip().lower() in {"1", "true", "yes"}
 RATE_LIMIT_BUCKETS: dict[str, list[float]] = {}
 RATE_LIMIT_MAX_BUCKETS = int(os.getenv("RATE_LIMIT_MAX_BUCKETS", "5000"))
 RATE_LIMIT_PRUNE_INTERVAL_SECONDS = int(os.getenv("RATE_LIMIT_PRUNE_INTERVAL_SECONDS", "60"))
 RATE_LIMIT_LAST_PRUNE = 0.0
-ASSET_VERSION = "20260603cardofday"
+ASSET_VERSION = "20260603avatarsave"
+AUTH_TOKEN_TTL_SECONDS = int(os.getenv("AUTH_TOKEN_TTL_SECONDS", str(60 * 60 * 24 * 14)))
+AUTH_SECRET_KEY = os.getenv("AUTH_SECRET_KEY", os.getenv("SECRET_KEY", DEFAULT_ADMIN_PASSWORD)).encode("utf-8")
+AUTH_COOKIE_NAME = os.getenv("AUTH_COOKIE_NAME", "pv_session")
+CSRF_COOKIE_NAME = os.getenv("CSRF_COOKIE_NAME", "pv_csrf")
+ADMIN_2FA_TTL_SECONDS = int(os.getenv("ADMIN_2FA_TTL_SECONDS", "600"))
+ADMIN_2FA_ENABLED = os.getenv("ADMIN_2FA_ENABLED", "1").strip() != "0"
+ADMIN_2FA_CHALLENGES: dict[str, dict[str, int | str]] = {}
 PDF_GENERATION_SEMAPHORE = threading.Semaphore(int(os.getenv("PDF_MAX_CONCURRENCY", "1")))
 LAST_EMAIL_ERROR: str | None = None
 RATE_LIMIT_RULES = {
     "register": (5, 900),
     "login": (10, 900),
+    "admin_2fa": (8, 900),
     "resend_verification": (6, 900),
+    "password_reset": (5, 900),
     "follow": (60, 300),
     "like": (90, 300),
     "create_deck": (180, 300),
@@ -204,10 +221,25 @@ def normalize_email(email: str) -> str:
     return email.strip().lower()
 
 
+def mask_email(email: str | None) -> str:
+    if not email or "@" not in email:
+        return ""
+    local, domain = email.split("@", 1)
+    if len(local) <= 2:
+        masked_local = local[:1] + "*"
+    else:
+        masked_local = f"{local[:2]}{'*' * min(len(local) - 2, 6)}"
+    return f"{masked_local}@{domain}"
+
+
 def hash_password(password: str) -> str:
     salt = secrets.token_hex(16)
     derived = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt.encode("utf-8"), 100_000)
     return f"{salt}${derived.hex()}"
+
+
+def password_fingerprint(profile: Profile) -> str:
+    return hashlib.sha256((profile.password_hash or "").encode("utf-8")).hexdigest()[:24]
 
 
 def verify_password(password: str, stored_hash: str | None) -> bool:
@@ -236,6 +268,11 @@ def ensure_default_admin_account() -> None:
             if updated:
                 db.commit()
             return
+        if not DEFAULT_ADMIN_PASSWORD_ENV and not ALLOW_DEFAULT_ADMIN_BOOTSTRAP:
+            logger.warning(
+                "Skipping default admin bootstrap because DEFAULT_ADMIN_PASSWORD is not configured."
+            )
+            return
         username = DEFAULT_ADMIN_USERNAME
         collision = db.scalar(select(Profile).where(Profile.username == username))
         if collision:
@@ -252,8 +289,135 @@ def ensure_default_admin_account() -> None:
         db.commit()
 
 
-def require_admin(profile_id: int, db: Session) -> Profile:
+def create_auth_token(profile: Profile) -> str:
+    expires_at = int(time.time()) + AUTH_TOKEN_TTL_SECONDS
+    nonce = secrets.token_urlsafe(12)
+    payload = f"{profile.id}:{expires_at}:{nonce}:{password_fingerprint(profile)}"
+    signature = hmac.new(AUTH_SECRET_KEY, payload.encode("utf-8"), hashlib.sha256).hexdigest()
+    token = f"{payload}:{signature}".encode("utf-8")
+    return base64.urlsafe_b64encode(token).decode("ascii")
+
+
+def create_csrf_token() -> str:
+    return secrets.token_urlsafe(24)
+
+
+def request_is_https(request: Request) -> bool:
+    forwarded_proto = request.headers.get("x-forwarded-proto", "")
+    return request.url.scheme == "https" or "https" in forwarded_proto
+
+
+def set_auth_cookies(response: Response, request: Request, auth_token: str, csrf_token: str) -> None:
+    secure = request_is_https(request)
+    response.set_cookie(
+        AUTH_COOKIE_NAME,
+        auth_token,
+        max_age=AUTH_TOKEN_TTL_SECONDS,
+        httponly=True,
+        secure=secure,
+        samesite="lax",
+        path="/",
+    )
+    response.set_cookie(
+        CSRF_COOKIE_NAME,
+        csrf_token,
+        max_age=AUTH_TOKEN_TTL_SECONDS,
+        httponly=False,
+        secure=secure,
+        samesite="lax",
+        path="/",
+    )
+
+
+def clear_auth_cookies(response: Response, request: Request) -> None:
+    secure = request_is_https(request)
+    response.delete_cookie(AUTH_COOKIE_NAME, path="/", secure=secure, httponly=True, samesite="lax")
+    response.delete_cookie(CSRF_COOKIE_NAME, path="/", secure=secure, httponly=False, samesite="lax")
+
+
+def profile_id_from_auth_token(token: str | None) -> int | None:
+    if not token:
+        return None
+    try:
+        decoded = base64.urlsafe_b64decode(token.encode("ascii")).decode("utf-8")
+        profile_id, expires_at, nonce, fingerprint, signature = decoded.split(":", 4)
+    except Exception:
+        return None
+    payload = f"{profile_id}:{expires_at}:{nonce}:{fingerprint}"
+    expected = hmac.new(AUTH_SECRET_KEY, payload.encode("utf-8"), hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(signature, expected):
+        return None
+    if int(expires_at) < int(time.time()):
+        return None
+    return int(profile_id) if profile_id.isdigit() else None
+
+
+def auth_token_password_fingerprint(token: str | None) -> str | None:
+    if not token:
+        return None
+    try:
+        decoded = base64.urlsafe_b64decode(token.encode("ascii")).decode("utf-8")
+        _profile_id, _expires_at, _nonce, fingerprint, _signature = decoded.split(":", 4)
+    except Exception:
+        return None
+    return fingerprint
+
+
+def auth_bearer_token(request: Request) -> str | None:
+    authorization = request.headers.get("authorization", "")
+    if authorization.lower().startswith("bearer "):
+        return authorization.split(" ", 1)[1].strip()
+    cookie_token = request.cookies.get(AUTH_COOKIE_NAME)
+    if not cookie_token:
+        return None
+    if request.method.upper() not in {"GET", "HEAD", "OPTIONS"}:
+        header_csrf = request.headers.get("x-csrf-token", "")
+        cookie_csrf = request.cookies.get(CSRF_COOKIE_NAME, "")
+        if not header_csrf or not cookie_csrf or not hmac.compare_digest(header_csrf, cookie_csrf):
+            return None
+    return cookie_token
+
+
+def require_authenticated_profile(profile_id: int, request: Request, db: Session) -> Profile:
+    token = auth_bearer_token(request)
+    token_profile_id = profile_id_from_auth_token(token)
+    if token_profile_id != profile_id:
+        raise HTTPException(status_code=401, detail="Authentication is required.")
     profile = db.get(Profile, profile_id)
+    if not profile:
+        raise HTTPException(status_code=404, detail="Profile not found.")
+    if profile.banned_at:
+        raise HTTPException(status_code=403, detail="This account is banned.")
+    token_fingerprint = auth_token_password_fingerprint(token)
+    if not token_fingerprint or not hmac.compare_digest(token_fingerprint, password_fingerprint(profile)):
+        raise HTTPException(status_code=401, detail="Session expired. Please log in again.")
+    return profile
+
+
+def optional_authenticated_profile(request: Request, db: Session) -> Profile | None:
+    token = auth_bearer_token(request)
+    token_profile_id = profile_id_from_auth_token(token)
+    if not token_profile_id:
+        return None
+    profile = db.get(Profile, token_profile_id)
+    if not profile or profile.banned_at:
+        return None
+    token_fingerprint = auth_token_password_fingerprint(token)
+    if not token_fingerprint or not hmac.compare_digest(token_fingerprint, password_fingerprint(profile)):
+        return None
+    return profile
+
+
+def authenticated_viewer_id(request: Request, db: Session) -> int | None:
+    profile = optional_authenticated_profile(request, db)
+    return profile.id if profile else None
+
+
+def require_admin(profile_id: int, db: Session, request: Request | None = None) -> Profile:
+    if request is not None:
+        profile = require_authenticated_profile(profile_id, request, db)
+    else:
+        profile = db.get(Profile, profile_id)
     if not profile or not profile.is_admin:
         raise HTTPException(status_code=403, detail="Admin access is required.")
     if profile.banned_at:
@@ -373,6 +537,10 @@ def build_verification_link(raw_token: str) -> str:
     return f"{APP_BASE_URL}/api/auth/verify-email?token={raw_token}"
 
 
+def build_password_reset_link(raw_token: str) -> str:
+    return f"{APP_BASE_URL}/profile?reset_token={raw_token}"
+
+
 def build_email_shell(*, eyebrow: str, title: str, intro: str, body_html: str, footer_html: str = "") -> str:
     return f"""
     <html>
@@ -428,6 +596,46 @@ If you did not create this account, you can safely ignore this email.
     """
     footer_html = "If you did not create this account, you can safely ignore this email."
     message.add_alternative(build_email_shell(eyebrow="Account Security", title="Verify your email", intro="Complete your Paladin's Vault registration with one secure click.", body_html=body_html, footer_html=footer_html), subtype="html")
+    return message
+
+
+def build_password_reset_message(profile: Profile, raw_token: str) -> EmailMessage:
+    reset_url = build_password_reset_link(raw_token)
+    message = EmailMessage()
+    message["Subject"] = "Reset your Paladin's Vault password"
+    message["From"] = f"Paladin's Vault <{SMTP_FROM_EMAIL}>"
+    message["To"] = profile.email
+    message.set_content(
+        f"""Hello {profile.username},
+
+We received a request to reset your Paladin's Vault password.
+
+Reset your password:
+{reset_url}
+
+This link expires in {PASSWORD_RESET_TTL_MINUTES} minutes. If you did not request this, you can safely ignore this email.
+"""
+    )
+    body_html = f"""
+      <p style="margin:0 0 14px;font-size:15px;line-height:1.75;color:#d7e5ff;">Hello <strong>{profile.username}</strong>,</p>
+      <p style="margin:0 0 16px;font-size:15px;line-height:1.75;color:#d7e5ff;">We received a request to reset your Paladin's Vault password.</p>
+      <div style="text-align:center;margin:24px 0 20px;">
+        <a href="{reset_url}" style="display:inline-block;padding:14px 22px;border-radius:14px;background:linear-gradient(135deg,#7ce7ff,#9fcbff);color:#081018;text-decoration:none;font-weight:800;letter-spacing:0.04em;">Reset Password</a>
+      </div>
+      <p style="margin:0 0 12px;font-size:14px;line-height:1.7;color:#c7d7f6;word-break:break-all;">Or open this link directly:<br><a href="{reset_url}" style="color:#8fe7ff;">{reset_url}</a></p>
+      <p style="margin:0;font-size:13px;line-height:1.7;color:#9fb2d5;">This link expires in <strong>{PASSWORD_RESET_TTL_MINUTES} minutes</strong>. Changing your password invalidates old sessions.</p>
+    """
+    footer_html = "If you did not request this password reset, you can safely ignore this email."
+    message.add_alternative(
+        build_email_shell(
+            eyebrow="Account Security",
+            title="Reset your password",
+            intro="Use this secure link to choose a new password.",
+            body_html=body_html,
+            footer_html=footer_html,
+        ),
+        subtype="html",
+    )
     return message
 
 
@@ -490,6 +698,71 @@ This message was sent from the Paladin's Vault admin dashboard.
 """
     message.add_alternative(html_body, subtype="html")
     return message
+
+
+def build_admin_2fa_message(profile: Profile, code: str) -> EmailMessage:
+    subject = "Your Paladin's Vault admin security code"
+    message = EmailMessage()
+    message["Subject"] = subject
+    message["From"] = f"Paladin's Vault <{SMTP_FROM_EMAIL}>"
+    message["To"] = profile.email
+    message.set_content(
+        f"""Hello {profile.username},
+
+Your Paladin's Vault admin login code is:
+
+{code}
+
+This code expires in {ADMIN_2FA_TTL_SECONDS // 60} minutes.
+If this was not you, change your password immediately.
+"""
+    )
+    body_html = f"""
+      <p style="margin:0 0 14px;font-size:15px;line-height:1.75;color:#d7e5ff;">Hello <strong>{profile.username}</strong>,</p>
+      <p style="margin:0 0 16px;font-size:15px;line-height:1.75;color:#d7e5ff;">Use this one-time code to finish your admin login:</p>
+      <div style="text-align:center;margin:24px 0;">
+        <span style="display:inline-block;padding:16px 24px;border-radius:16px;background:#dff8ff;color:#07111b;font-size:30px;font-weight:900;letter-spacing:.22em;">{code}</span>
+      </div>
+      <p style="margin:0;font-size:13px;line-height:1.7;color:#9fb2d5;">This code expires in <strong>{ADMIN_2FA_TTL_SECONDS // 60} minutes</strong>. If this was not you, change your password immediately.</p>
+    """
+    message.add_alternative(
+        build_email_shell(
+            eyebrow="Admin Security",
+            title="Confirm your admin login",
+            intro="A second security check is required before opening the admin dashboard.",
+            body_html=body_html,
+            footer_html="This extra check protects Paladin's Vault admin tools and user data.",
+        ),
+        subtype="html",
+    )
+    return message
+
+
+def prune_admin_2fa_challenges() -> None:
+    now = int(time.time())
+    expired = [challenge_id for challenge_id, challenge in ADMIN_2FA_CHALLENGES.items() if int(challenge.get("expires_at", 0)) < now]
+    for challenge_id in expired:
+        ADMIN_2FA_CHALLENGES.pop(challenge_id, None)
+
+
+def issue_admin_2fa_challenge(profile: Profile, request: Request, db: Session) -> str:
+    if not profile.email:
+        raise HTTPException(status_code=400, detail="Admin account needs an email address for 2FA.")
+    if not email_delivery_configured():
+        raise HTTPException(status_code=503, detail="Admin 2FA email delivery is not configured.")
+    prune_admin_2fa_challenges()
+    challenge_id = secrets.token_urlsafe(24)
+    code = f"{secrets.randbelow(1_000_000):06d}"
+    ADMIN_2FA_CHALLENGES[challenge_id] = {
+        "profile_id": profile.id,
+        "code_hash": verification_token_hash(code),
+        "expires_at": int(time.time()) + ADMIN_2FA_TTL_SECONDS,
+        "attempts": 0,
+    }
+    send_email_message(build_admin_2fa_message(profile, code))
+    create_admin_audit(db, profile.id, "admin_2fa_sent", detail=f"ip={client_ip(request)}")
+    db.commit()
+    return challenge_id
 
 
 def build_playmode_turn_message(*, recipient: Profile, actor: Profile, match: PlayMatch, move_summary: str | None = None) -> EmailMessage:
@@ -611,6 +884,20 @@ def issue_verification_token(profile: Profile, db: Session) -> str:
         )
     )
     profile.verification_sent_at = now
+    return raw_token
+
+
+def issue_password_reset_token(profile: Profile, db: Session) -> str:
+    raw_token = secrets.token_urlsafe(32)
+    db.add(
+        PasswordResetToken(
+            profile_id=profile.id,
+            token_hash=verification_token_hash(raw_token),
+            expires_at=datetime.utcnow() + timedelta(minutes=PASSWORD_RESET_TTL_MINUTES),
+            created_at=datetime.utcnow(),
+        )
+    )
+    profile.verification_sent_at = datetime.utcnow()
     return raw_token
 
 
@@ -3616,14 +3903,15 @@ def creature_coverage(db: Session = Depends(get_db)) -> dict:
 
 
 @app.get("/api/profiles", response_model=ProfileListResponse)
-def list_profiles(viewer_profile_id: int | None = None, db: Session = Depends(get_db)) -> ProfileListResponse:
+def list_profiles(request: Request, viewer_profile_id: int | None = None, db: Session = Depends(get_db)) -> ProfileListResponse:
+    viewer_id = authenticated_viewer_id(request, db)
     profiles = db.execute(
         select(Profile)
         .options(joinedload(Profile.follower_links), joinedload(Profile.following_links))
         .order_by(Profile.username.asc())
     ).unique().scalars().all()
     profiles.sort(key=lambda profile: (-len(profile.follower_links), profile.username.lower(), profile.id))
-    return ProfileListResponse(items=[profile_to_out(profile, viewer_profile_id=viewer_profile_id) for profile in profiles if profile])
+    return ProfileListResponse(items=[profile_to_out(profile, viewer_profile_id=viewer_id) for profile in profiles if profile])
 
 
 @app.post("/api/profiles", response_model=ProfileOut)
@@ -3651,7 +3939,7 @@ def create_profile(payload: ProfileCreateIn, db: Session = Depends(get_db)) -> P
 
 
 @app.post("/api/auth/register", response_model=AuthResponse)
-def register(payload: AuthRegisterIn, request: Request, db: Session = Depends(get_db)) -> AuthResponse:
+def register(payload: AuthRegisterIn, request: Request, response: Response, db: Session = Depends(get_db)) -> AuthResponse:
     enforce_rate_limit("register", request, extra_key=normalize_email(payload.email))
     email = normalize_email(payload.email)
     username = slugify(payload.username)
@@ -3680,8 +3968,13 @@ def register(payload: AuthRegisterIn, request: Request, db: Session = Depends(ge
         profile.email_verified_at = datetime.utcnow()
         db.commit()
         db.refresh(profile)
+        auth_token = create_auth_token(profile)
+        csrf_token = create_csrf_token()
+        set_auth_cookies(response, request, auth_token, csrf_token)
         return AuthResponse(
             profile=profile_to_out(profile, include_email=True),
+            auth_token=auth_token,
+            csrf_token=csrf_token,
             verification_required=False,
             verification_email_sent=False,
             message="Account created and auto-verified for local development. You can log in now.",
@@ -3712,7 +4005,7 @@ def register(payload: AuthRegisterIn, request: Request, db: Session = Depends(ge
 
 
 @app.post("/api/auth/login", response_model=AuthResponse)
-def login(payload: AuthLoginIn, request: Request, db: Session = Depends(get_db)) -> AuthResponse:
+def login(payload: AuthLoginIn, request: Request, response: Response, db: Session = Depends(get_db)) -> AuthResponse:
     enforce_rate_limit("login", request, extra_key=normalize_email(payload.email))
     email = normalize_email(payload.email)
     profile = db.scalar(select(Profile).where(Profile.email == email))
@@ -3723,12 +4016,120 @@ def login(payload: AuthLoginIn, request: Request, db: Session = Depends(get_db))
         raise HTTPException(status_code=403, detail=f"This account is banned.{reason}")
     if not is_email_verified(profile):
         raise HTTPException(status_code=403, detail="Verify your email before logging in.")
+    if profile.is_admin and ADMIN_2FA_ENABLED:
+        challenge_id = issue_admin_2fa_challenge(profile, request, db)
+        return AuthResponse(
+            profile=profile_to_out(profile, include_email=True),
+            admin_2fa_required=True,
+            admin_2fa_challenge_id=challenge_id,
+            verification_required=False,
+            verification_email_sent=False,
+            message="Admin security code sent to your email.",
+        )
+    auth_token = create_auth_token(profile)
+    csrf_token = create_csrf_token()
+    set_auth_cookies(response, request, auth_token, csrf_token)
     return AuthResponse(
         profile=profile_to_out(profile, include_email=True),
+        auth_token=auth_token,
+        csrf_token=csrf_token,
         verification_required=False,
         verification_email_sent=False,
         message="Login successful.",
     )
+
+
+@app.post("/api/auth/admin-2fa/verify", response_model=AuthResponse)
+def verify_admin_2fa(payload: AdminTwoFactorVerifyIn, request: Request, response: Response, db: Session = Depends(get_db)) -> AuthResponse:
+    enforce_rate_limit("admin_2fa", request, extra_key=payload.challenge_id)
+    prune_admin_2fa_challenges()
+    challenge = ADMIN_2FA_CHALLENGES.get(payload.challenge_id)
+    if not challenge:
+        raise HTTPException(status_code=401, detail="Admin security code expired. Please log in again.")
+    attempts = int(challenge.get("attempts", 0)) + 1
+    challenge["attempts"] = attempts
+    if attempts > 5:
+        ADMIN_2FA_CHALLENGES.pop(payload.challenge_id, None)
+        raise HTTPException(status_code=429, detail="Too many incorrect admin security codes. Please log in again.")
+    profile_id = int(challenge.get("profile_id", 0))
+    profile = db.get(Profile, profile_id)
+    if not profile or not profile.is_admin or profile.banned_at:
+        ADMIN_2FA_CHALLENGES.pop(payload.challenge_id, None)
+        raise HTTPException(status_code=403, detail="Admin access is required.")
+    code_hash = verification_token_hash(payload.code.strip())
+    if not hmac.compare_digest(str(challenge.get("code_hash", "")), code_hash):
+        create_admin_audit(db, profile.id, "admin_2fa_failed", detail=f"ip={client_ip(request)}")
+        db.commit()
+        raise HTTPException(status_code=401, detail="Invalid admin security code.")
+    ADMIN_2FA_CHALLENGES.pop(payload.challenge_id, None)
+    auth_token = create_auth_token(profile)
+    csrf_token = create_csrf_token()
+    set_auth_cookies(response, request, auth_token, csrf_token)
+    create_admin_audit(db, profile.id, "admin_login", detail=f"ip={client_ip(request)}")
+    db.commit()
+    return AuthResponse(
+        profile=profile_to_out(profile, include_email=True),
+        auth_token=auth_token,
+        csrf_token=csrf_token,
+        verification_required=False,
+        verification_email_sent=False,
+        message="Admin login confirmed.",
+    )
+
+
+@app.post("/api/auth/logout", response_model=GenericMessageOut)
+def logout(request: Request, response: Response) -> GenericMessageOut:
+    clear_auth_cookies(response, request)
+    return GenericMessageOut(status="ok", message="Logged out.")
+
+
+@app.post("/api/auth/password-reset/request", response_model=GenericMessageOut)
+def request_password_reset(payload: PasswordResetRequestIn, request: Request, db: Session = Depends(get_db)) -> GenericMessageOut:
+    email = normalize_email(payload.email)
+    enforce_rate_limit("password_reset", request, extra_key=email)
+    generic = GenericMessageOut(status="ok", message="If the account exists, a password reset email has been sent.")
+    if not email_delivery_configured():
+        return GenericMessageOut(status="error", message="Password reset email delivery is not configured yet.")
+    profile = db.scalar(select(Profile).where(Profile.email == email))
+    if not profile or profile.banned_at or not profile.email_verified_at:
+        return generic
+    raw_token = issue_password_reset_token(profile, db)
+    db.commit()
+    try:
+        send_email_message(build_password_reset_message(profile, raw_token))
+    except Exception as error:
+        logger.exception("Password reset email failed: %s", error)
+        return GenericMessageOut(status="error", message="Password reset email could not be sent right now.")
+    return generic
+
+
+@app.post("/api/auth/password-reset/confirm", response_model=GenericMessageOut)
+def confirm_password_reset(payload: PasswordResetConfirmIn, request: Request, response: Response, db: Session = Depends(get_db)) -> GenericMessageOut:
+    enforce_rate_limit("password_reset", request, extra_key=client_ip(request))
+    enforce_password_policy(payload.password)
+    hashed = verification_token_hash(payload.token)
+    reset = db.execute(
+        select(PasswordResetToken)
+        .options(joinedload(PasswordResetToken.profile))
+        .where(PasswordResetToken.token_hash == hashed)
+    ).unique().scalar_one_or_none()
+    now = datetime.utcnow()
+    if not reset or reset.used_at or reset.expires_at < now or not reset.profile:
+        raise HTTPException(status_code=400, detail="This password reset link is invalid or expired.")
+    profile = reset.profile
+    if profile.banned_at:
+        raise HTTPException(status_code=403, detail="This account is banned.")
+    profile.password_hash = hash_password(payload.password)
+    profile.email_verified_at = profile.email_verified_at or now
+    reset.used_at = now
+    for token_row in db.scalars(select(PasswordResetToken).where(PasswordResetToken.profile_id == profile.id)).all():
+        if token_row.id != reset.id and token_row.used_at is None:
+            token_row.used_at = now
+    if profile.is_admin:
+        create_admin_audit(db, profile.id, "admin_password_reset", detail=f"ip={client_ip(request)}")
+    db.commit()
+    clear_auth_cookies(response, request)
+    return GenericMessageOut(status="ok", message="Password updated. Please log in again.")
 
 
 @app.post("/api/auth/resend-verification", response_model=GenericMessageOut)
@@ -3801,7 +4202,8 @@ def verify_email(token: str, db: Session = Depends(get_db)) -> RedirectResponse:
 
 
 @app.patch("/api/profiles/{profile_id}", response_model=ProfileOut)
-def update_profile(profile_id: int, payload: ProfileUpdateIn, db: Session = Depends(get_db)) -> ProfileOut:
+def update_profile(profile_id: int, payload: ProfileUpdateIn, request: Request, db: Session = Depends(get_db)) -> ProfileOut:
+    require_authenticated_profile(profile_id, request, db)
     profile = db.execute(
         select(Profile)
         .options(joinedload(Profile.follower_links), joinedload(Profile.following_links))
@@ -3828,7 +4230,8 @@ def update_profile(profile_id: int, payload: ProfileUpdateIn, db: Session = Depe
 
 
 @app.post("/api/profiles/{profile_id}/delete", response_model=GenericMessageOut)
-def delete_profile(profile_id: int, payload: ProfileDeleteIn, db: Session = Depends(get_db)) -> GenericMessageOut:
+def delete_profile(profile_id: int, payload: ProfileDeleteIn, request: Request, db: Session = Depends(get_db)) -> GenericMessageOut:
+    require_authenticated_profile(profile_id, request, db)
     profile = db.execute(
         select(Profile)
         .options(
@@ -3863,6 +4266,7 @@ def delete_profile(profile_id: int, payload: ProfileDeleteIn, db: Session = Depe
 @app.post("/api/profiles/{profile_id}/follow", response_model=ProfileOut)
 def follow_profile(profile_id: int, payload: FollowToggleIn, request: Request, db: Session = Depends(get_db)) -> ProfileOut:
     enforce_rate_limit("follow", request, extra_key=str(payload.follower_profile_id))
+    require_authenticated_profile(payload.follower_profile_id, request, db)
     if payload.follower_profile_id == profile_id:
         raise HTTPException(status_code=400, detail="You cannot follow yourself.")
 
@@ -3892,10 +4296,8 @@ def follow_profile(profile_id: int, payload: FollowToggleIn, request: Request, d
 
 
 @app.get("/api/playmode/matches", response_model=PlaymodeMatchListOut)
-def list_playmode_matches(profile_id: int, db: Session = Depends(get_db)) -> PlaymodeMatchListOut:
-    profile = db.get(Profile, profile_id)
-    if not profile:
-        raise HTTPException(status_code=404, detail="Profile not found.")
+def list_playmode_matches(profile_id: int, request: Request, db: Session = Depends(get_db)) -> PlaymodeMatchListOut:
+    profile = require_authenticated_profile(profile_id, request, db)
     query = (
         select(PlayMatch)
         .options(
@@ -3916,10 +4318,8 @@ def list_playmode_matches(profile_id: int, db: Session = Depends(get_db)) -> Pla
 
 
 @app.post("/api/playmode/matches", response_model=PlaymodeMatchViewOut)
-def create_playmode_match(payload: PlaymodeMatchCreateIn, db: Session = Depends(get_db)) -> PlaymodeMatchViewOut:
-    profile = db.get(Profile, payload.profile_id)
-    if not profile:
-        raise HTTPException(status_code=404, detail="Profile not found.")
+def create_playmode_match(payload: PlaymodeMatchCreateIn, request: Request, db: Session = Depends(get_db)) -> PlaymodeMatchViewOut:
+    profile = require_authenticated_profile(payload.profile_id, request, db)
     if payload.mode not in {"live", "async", "computer"}:
         raise HTTPException(status_code=400, detail="Mode must be live, async, or computer.")
     deck = ensure_owned_deck(db, payload.deck_public_id, payload.profile_id)
@@ -4022,10 +4422,8 @@ def create_playmode_match(payload: PlaymodeMatchCreateIn, db: Session = Depends(
 
 
 @app.post("/api/playmode/matches/{public_id}/join", response_model=PlaymodeMatchViewOut)
-def join_playmode_match(public_id: str, payload: PlaymodeMatchJoinIn, db: Session = Depends(get_db)) -> PlaymodeMatchViewOut:
-    profile = db.get(Profile, payload.profile_id)
-    if not profile:
-        raise HTTPException(status_code=404, detail="Profile not found.")
+def join_playmode_match(public_id: str, payload: PlaymodeMatchJoinIn, request: Request, db: Session = Depends(get_db)) -> PlaymodeMatchViewOut:
+    profile = require_authenticated_profile(payload.profile_id, request, db)
     match = db.scalar(
         select(PlayMatch)
         .where(PlayMatch.public_id == public_id)
@@ -4082,8 +4480,9 @@ def join_playmode_match(public_id: str, payload: PlaymodeMatchJoinIn, db: Sessio
 
 
 @app.get("/api/playmode/matches/{public_id}", response_model=PlaymodeMatchViewOut)
-def get_playmode_match(public_id: str, profile_id: int | None = None, db: Session = Depends(get_db)) -> PlaymodeMatchViewOut:
-    viewer_profile = db.get(Profile, profile_id) if profile_id else None
+def get_playmode_match(public_id: str, request: Request, profile_id: int | None = None, db: Session = Depends(get_db)) -> PlaymodeMatchViewOut:
+    viewer_profile = optional_authenticated_profile(request, db)
+    trusted_profile_id = viewer_profile.id if viewer_profile else None
     match = db.scalar(
         select(PlayMatch)
         .where(PlayMatch.public_id == public_id)
@@ -4100,22 +4499,20 @@ def get_playmode_match(public_id: str, profile_id: int | None = None, db: Sessio
     maybe_auto_resolve_playmode_match(match, db)
     state_meta = json.loads(match.state_json or "{}")
     if viewer_profile and viewer_profile.is_admin:
-        return playmode_match_view(match, profile_id, db, admin_override=True)
+        return playmode_match_view(match, trusted_profile_id, db, admin_override=True)
     if playmode_spectator_allows(state_meta, viewer_profile, match=match):
-        return playmode_match_view(match, profile_id, db)
-    if not playmode_invite_allows(state_meta, profile_id, match=match):
+        return playmode_match_view(match, trusted_profile_id, db)
+    if not playmode_invite_allows(state_meta, trusted_profile_id, match=match):
         raise HTTPException(status_code=403, detail="This private match can only be viewed by invited players.")
     invited_profile_id = state_meta.get("invited_profile_id")
-    if profile_id and profile_id not in {match.player_one_profile_id, match.player_two_profile_id, invited_profile_id}:
+    if trusted_profile_id and trusted_profile_id not in {match.player_one_profile_id, match.player_two_profile_id, invited_profile_id}:
         raise HTTPException(status_code=403, detail="You do not have access to this match.")
-    return playmode_match_view(match, profile_id, db)
+    return playmode_match_view(match, trusted_profile_id, db)
 
 
 @app.post("/api/playmode/matches/{public_id}/spectate-invites", response_model=GenericMessageOut)
-def invite_playmode_spectator(public_id: str, payload: PlaymodeSpectateInviteIn, db: Session = Depends(get_db)) -> GenericMessageOut:
-    actor = db.get(Profile, payload.profile_id)
-    if not actor:
-        raise HTTPException(status_code=404, detail="Profile not found.")
+def invite_playmode_spectator(public_id: str, payload: PlaymodeSpectateInviteIn, request: Request, db: Session = Depends(get_db)) -> GenericMessageOut:
+    actor = require_authenticated_profile(payload.profile_id, request, db)
     match = db.scalar(
         select(PlayMatch)
         .where(PlayMatch.public_id == public_id)
@@ -4174,10 +4571,8 @@ def invite_playmode_spectator(public_id: str, payload: PlaymodeSpectateInviteIn,
 
 
 @app.post("/api/playmode/matches/{public_id}/action", response_model=PlaymodeMatchViewOut)
-def apply_playmode_action(public_id: str, payload: PlaymodeActionIn, db: Session = Depends(get_db)) -> PlaymodeMatchViewOut:
-    acting_profile = db.get(Profile, payload.profile_id)
-    if not acting_profile:
-        raise HTTPException(status_code=404, detail="Profile not found.")
+def apply_playmode_action(public_id: str, payload: PlaymodeActionIn, request: Request, db: Session = Depends(get_db)) -> PlaymodeMatchViewOut:
+    acting_profile = require_authenticated_profile(payload.profile_id, request, db)
     is_admin_override = bool(acting_profile.is_admin)
     match = db.scalar(
         select(PlayMatch)
@@ -4296,10 +4691,8 @@ def apply_playmode_action(public_id: str, payload: PlaymodeActionIn, db: Session
 
 
 @app.post("/api/playmode/matches/{public_id}/state", response_model=PlaymodeMatchViewOut)
-def update_playmode_match(public_id: str, payload: PlaymodeMatchUpdateIn, db: Session = Depends(get_db)) -> PlaymodeMatchViewOut:
-    acting_profile = db.get(Profile, payload.profile_id)
-    if not acting_profile:
-        raise HTTPException(status_code=404, detail="Profile not found.")
+def update_playmode_match(public_id: str, payload: PlaymodeMatchUpdateIn, request: Request, db: Session = Depends(get_db)) -> PlaymodeMatchViewOut:
+    acting_profile = require_authenticated_profile(payload.profile_id, request, db)
     is_admin_override = bool(acting_profile.is_admin)
     match = db.scalar(
         select(PlayMatch)
@@ -4402,7 +4795,8 @@ def update_playmode_match(public_id: str, payload: PlaymodeMatchUpdateIn, db: Se
 
 
 @app.get("/api/profiles/{profile_id}/notifications", response_model=NotificationListResponse)
-def list_notifications(profile_id: int, db: Session = Depends(get_db)) -> NotificationListResponse:
+def list_notifications(profile_id: int, request: Request, db: Session = Depends(get_db)) -> NotificationListResponse:
+    require_authenticated_profile(profile_id, request, db)
     notifications = db.execute(
         select(Notification)
         .options(
@@ -4418,7 +4812,8 @@ def list_notifications(profile_id: int, db: Session = Depends(get_db)) -> Notifi
 
 
 @app.post("/api/profiles/{profile_id}/notifications/read", response_model=GenericMessageOut)
-def mark_notifications_read(profile_id: int, db: Session = Depends(get_db)) -> GenericMessageOut:
+def mark_notifications_read(profile_id: int, request: Request, db: Session = Depends(get_db)) -> GenericMessageOut:
+    require_authenticated_profile(profile_id, request, db)
     notifications = db.scalars(
         select(Notification)
         .where(Notification.profile_id == profile_id)
@@ -4444,7 +4839,7 @@ def contact_message_to_out(message: ContactMessage) -> ContactMessageOut:
 
 
 @app.post("/api/contact-messages", response_model=GenericMessageOut)
-def create_contact_message(payload: ContactMessageIn, db: Session = Depends(get_db)) -> GenericMessageOut:
+def create_contact_message(payload: ContactMessageIn, request: Request, db: Session = Depends(get_db)) -> GenericMessageOut:
     username = slugify(payload.username)
     email = normalize_email(payload.email)
     subject = payload.subject.strip()
@@ -4459,6 +4854,7 @@ def create_contact_message(payload: ContactMessageIn, db: Session = Depends(get_
         raise HTTPException(status_code=400, detail="Message is required.")
     profile_id = payload.profile_id
     if profile_id:
+        require_authenticated_profile(profile_id, request, db)
         profile = db.get(Profile, profile_id)
         if not profile:
             raise HTTPException(status_code=404, detail="Profile not found.")
@@ -4470,8 +4866,8 @@ def create_contact_message(payload: ContactMessageIn, db: Session = Depends(get_
 
 
 @app.get("/api/admin/overview", response_model=AdminOverviewOut)
-def admin_overview(admin_profile_id: int, db: Session = Depends(get_db)) -> AdminOverviewOut:
-    require_admin(admin_profile_id, db)
+def admin_overview(admin_profile_id: int, request: Request, db: Session = Depends(get_db)) -> AdminOverviewOut:
+    require_admin(admin_profile_id, db, request=request)
     profiles = db.execute(
         select(Profile)
         .options(joinedload(Profile.follower_links), joinedload(Profile.following_links))
@@ -4536,8 +4932,8 @@ def admin_overview(admin_profile_id: int, db: Session = Depends(get_db)) -> Admi
 
 
 @app.get("/api/admin/month-details", response_model=AdminMonthDetailsOut)
-def admin_month_details(admin_profile_id: int, month: str, db: Session = Depends(get_db)) -> AdminMonthDetailsOut:
-    require_admin(admin_profile_id, db)
+def admin_month_details(admin_profile_id: int, month: str, request: Request, db: Session = Depends(get_db)) -> AdminMonthDetailsOut:
+    require_admin(admin_profile_id, db, request=request)
     try:
         month_start = datetime.strptime(month, "%Y-%m")
     except ValueError as exc:
@@ -4591,7 +4987,7 @@ def admin_month_details(admin_profile_id: int, month: str, db: Session = Depends
 @app.post("/api/admin/notify", response_model=GenericMessageOut)
 def admin_notify(payload: AdminNotificationIn, request: Request, db: Session = Depends(get_db)) -> GenericMessageOut:
     enforce_rate_limit("admin_notify", request, extra_key=str(payload.admin_profile_id))
-    admin = require_admin(payload.admin_profile_id, db)
+    admin = require_admin(payload.admin_profile_id, db, request=request)
     message = payload.message.strip()
     if not message:
         raise HTTPException(status_code=400, detail="Notification message is required.")
@@ -4615,7 +5011,7 @@ def admin_notify(payload: AdminNotificationIn, request: Request, db: Session = D
 @app.post("/api/admin/email", response_model=GenericMessageOut)
 def admin_email(payload: AdminEmailIn, request: Request, db: Session = Depends(get_db)) -> GenericMessageOut:
     enforce_rate_limit("admin_notify", request, extra_key=str(payload.admin_profile_id))
-    admin = require_admin(payload.admin_profile_id, db)
+    admin = require_admin(payload.admin_profile_id, db, request=request)
     target = db.get(Profile, payload.target_profile_id) if payload.target_profile_id else None
     target_email = normalize_email(payload.target_email) if payload.target_email else None
     if not target and not target_email:
@@ -4646,14 +5042,14 @@ def admin_email(payload: AdminEmailIn, request: Request, db: Session = Depends(g
         raise HTTPException(status_code=502, detail=str(error) or "Email sending failed.") from error
     if target:
         db.add(Notification(profile_id=target.id, actor_profile_id=admin.id, type="admin_message", message=f"Admin email sent: {subject}", created_at=datetime.utcnow()))
-    create_admin_audit(db, admin.id, "email_user", target_profile_id=target.id if target else None, detail=f"{recipient_email} • {subject}")
+    create_admin_audit(db, admin.id, "email_user", target_profile_id=target.id if target else None, detail=f"{mask_email(recipient_email)} • {subject}")
     db.commit()
     return GenericMessageOut(status="ok", message=f"Email sent to {recipient_name} at {recipient_email}.")
 
 
 @app.post("/api/admin/verify", response_model=GenericMessageOut)
-def admin_verify(payload: AdminVerifyIn, db: Session = Depends(get_db)) -> GenericMessageOut:
-    admin = require_admin(payload.admin_profile_id, db)
+def admin_verify(payload: AdminVerifyIn, request: Request, db: Session = Depends(get_db)) -> GenericMessageOut:
+    admin = require_admin(payload.admin_profile_id, db, request=request)
     target = db.get(Profile, payload.target_profile_id)
     if not target:
         raise HTTPException(status_code=404, detail="Target profile not found.")
@@ -4661,7 +5057,7 @@ def admin_verify(payload: AdminVerifyIn, db: Session = Depends(get_db)) -> Gener
         return GenericMessageOut(status="ok", message=f"{target.username} is already verified.")
     target.email_verified_at = datetime.utcnow()
     db.add(Notification(profile_id=target.id, actor_profile_id=admin.id, type="admin_message", message="Your email address has been manually verified by the Paladin's Vault admin.", created_at=datetime.utcnow()))
-    create_admin_audit(db, admin.id, "verify_email", target_profile_id=target.id, detail=target.email)
+    create_admin_audit(db, admin.id, "verify_email", target_profile_id=target.id, detail=mask_email(target.email))
     db.commit()
     return GenericMessageOut(status="ok", message=f"{target.username} has been verified.")
 
@@ -4669,7 +5065,7 @@ def admin_verify(payload: AdminVerifyIn, db: Session = Depends(get_db)) -> Gener
 @app.post("/api/admin/ban", response_model=GenericMessageOut)
 def admin_ban(payload: AdminBanIn, request: Request, db: Session = Depends(get_db)) -> GenericMessageOut:
     enforce_rate_limit("admin_ban", request, extra_key=str(payload.admin_profile_id))
-    admin = require_admin(payload.admin_profile_id, db)
+    admin = require_admin(payload.admin_profile_id, db, request=request)
     target = db.get(Profile, payload.target_profile_id)
     if not target:
         raise HTTPException(status_code=404, detail="Target profile not found.")
@@ -4691,7 +5087,8 @@ def admin_ban(payload: AdminBanIn, request: Request, db: Session = Depends(get_d
 
 
 @app.get("/api/profiles/{profile_id}/decks", response_model=ProfileDecksResponse)
-def get_profile_decks(profile_id: int, viewer_profile_id: int | None = None, db: Session = Depends(get_db)) -> ProfileDecksResponse:
+def get_profile_decks(profile_id: int, request: Request, viewer_profile_id: int | None = None, db: Session = Depends(get_db)) -> ProfileDecksResponse:
+    viewer_id = authenticated_viewer_id(request, db)
     profile = db.execute(
         select(Profile)
         .options(
@@ -4708,24 +5105,25 @@ def get_profile_decks(profile_id: int, viewer_profile_id: int | None = None, db:
 
     summaries = []
     for deck in sorted(profile.decks, key=lambda item: item.updated_at, reverse=True):
-        if deck.visibility != "public" and viewer_profile_id != profile.id:
+        if deck.visibility != "public" and viewer_id != profile.id:
             continue
-        summaries.append(deck_summary_out(deck, profile, include_owner_email=viewer_profile_id == profile.id, viewer_profile_id=viewer_profile_id))
+        summaries.append(deck_summary_out(deck, profile, include_owner_email=viewer_id == profile.id, viewer_profile_id=viewer_id))
 
     liked_summaries = []
     for like in sorted(profile.deck_likes, key=lambda item: item.created_at, reverse=True):
         deck = like.deck
         if not deck:
             continue
-        if deck.visibility != "public" and viewer_profile_id != profile.id:
+        if deck.visibility != "public" and viewer_id != profile.id:
             continue
-        liked_summaries.append(deck_summary_out(deck, deck.profile, include_owner_email=viewer_profile_id == (deck.profile_id or -1), viewer_profile_id=viewer_profile_id))
+        liked_summaries.append(deck_summary_out(deck, deck.profile, include_owner_email=viewer_id == (deck.profile_id or -1), viewer_profile_id=viewer_id))
 
     return ProfileDecksResponse(decks=summaries, liked_decks=liked_summaries)
 
 
 @app.get("/api/profiles/{profile_id}", response_model=ProfileDetailOut)
-def get_profile(profile_id: int, viewer_profile_id: int | None = None, db: Session = Depends(get_db)) -> ProfileDetailOut:
+def get_profile(profile_id: int, request: Request, viewer_profile_id: int | None = None, db: Session = Depends(get_db)) -> ProfileDetailOut:
+    viewer_id = authenticated_viewer_id(request, db)
     profile = db.execute(
         select(Profile)
         .options(*PROFILE_DETAIL_LOAD_OPTIONS)
@@ -4736,37 +5134,38 @@ def get_profile(profile_id: int, viewer_profile_id: int | None = None, db: Sessi
 
     summaries = []
     for deck in sorted(profile.decks, key=lambda item: item.updated_at, reverse=True):
-        if deck.visibility != "public" and viewer_profile_id != profile.id:
+        if deck.visibility != "public" and viewer_id != profile.id:
             continue
-        summaries.append(deck_summary_out(deck, profile, include_owner_email=viewer_profile_id == profile.id, viewer_profile_id=viewer_profile_id))
+        summaries.append(deck_summary_out(deck, profile, include_owner_email=viewer_id == profile.id, viewer_profile_id=viewer_id))
 
     liked_summaries = []
     for like in sorted(profile.deck_likes, key=lambda item: item.created_at, reverse=True):
         deck = like.deck
         if not deck:
             continue
-        if deck.visibility != "public" and viewer_profile_id != profile.id:
+        if deck.visibility != "public" and viewer_id != profile.id:
             continue
-        liked_summaries.append(deck_summary_out(deck, deck.profile, include_owner_email=viewer_profile_id == (deck.profile_id or -1), viewer_profile_id=viewer_profile_id))
+        liked_summaries.append(deck_summary_out(deck, deck.profile, include_owner_email=viewer_id == (deck.profile_id or -1), viewer_profile_id=viewer_id))
 
     return ProfileDetailOut(
         id=profile.id,
         username=profile.username,
         display_name=profile.username,
-        email=profile.email if viewer_profile_id == profile.id else None,
+        email=profile.email if viewer_id == profile.id else None,
         email_verified=bool(profile.email_verified_at),
         avatar_url=profile.avatar_url,
         bio=profile.bio,
         follower_count=len(profile.follower_links),
         following_count=len(profile.following_links),
         decks=summaries,
-        following=[profile_to_out(link.followed, viewer_profile_id=viewer_profile_id) for link in profile.following_links if link.followed],
+        following=[profile_to_out(link.followed, viewer_profile_id=viewer_id) for link in profile.following_links if link.followed],
         liked_decks=liked_summaries,
     )
 
 
 @app.get("/api/profiles/by-username/{username}", response_model=ProfileDetailOut)
-def get_profile_by_username(username: str, viewer_profile_id: int | None = None, db: Session = Depends(get_db)) -> ProfileDetailOut:
+def get_profile_by_username(username: str, request: Request, viewer_profile_id: int | None = None, db: Session = Depends(get_db)) -> ProfileDetailOut:
+    viewer_id = authenticated_viewer_id(request, db)
     profile = db.execute(
         select(Profile)
         .options(*PROFILE_DETAIL_LOAD_OPTIONS)
@@ -4777,31 +5176,31 @@ def get_profile_by_username(username: str, viewer_profile_id: int | None = None,
 
     summaries = []
     for deck in sorted(profile.decks, key=lambda item: item.updated_at, reverse=True):
-        if deck.visibility != "public" and viewer_profile_id != profile.id:
+        if deck.visibility != "public" and viewer_id != profile.id:
             continue
-        summaries.append(deck_summary_out(deck, profile, include_owner_email=viewer_profile_id == profile.id, viewer_profile_id=viewer_profile_id))
+        summaries.append(deck_summary_out(deck, profile, include_owner_email=viewer_id == profile.id, viewer_profile_id=viewer_id))
 
     liked_summaries = []
     for like in sorted(profile.deck_likes, key=lambda item: item.created_at, reverse=True):
         deck = like.deck
         if not deck:
             continue
-        if deck.visibility != "public" and viewer_profile_id != profile.id:
+        if deck.visibility != "public" and viewer_id != profile.id:
             continue
-        liked_summaries.append(deck_summary_out(deck, deck.profile, include_owner_email=viewer_profile_id == (deck.profile_id or -1), viewer_profile_id=viewer_profile_id))
+        liked_summaries.append(deck_summary_out(deck, deck.profile, include_owner_email=viewer_id == (deck.profile_id or -1), viewer_profile_id=viewer_id))
 
     return ProfileDetailOut(
         id=profile.id,
         username=profile.username,
         display_name=profile.username,
-        email=profile.email if viewer_profile_id == profile.id else None,
+        email=profile.email if viewer_id == profile.id else None,
         email_verified=bool(profile.email_verified_at),
         avatar_url=profile.avatar_url,
         bio=profile.bio,
         follower_count=len(profile.follower_links),
         following_count=len(profile.following_links),
         decks=summaries,
-        following=[profile_to_out(link.followed, viewer_profile_id=viewer_profile_id) for link in profile.following_links if link.followed],
+        following=[profile_to_out(link.followed, viewer_profile_id=viewer_id) for link in profile.following_links if link.followed],
         liked_decks=liked_summaries,
     )
 
@@ -4865,6 +5264,7 @@ def create_deck(payload: DeckCreateIn, request: Request, db: Session = Depends(g
 
     if not db.get(Profile, profile_id):
         raise HTTPException(status_code=400, detail="Profile not found.")
+    require_authenticated_profile(profile_id, request, db)
 
     visibility = payload.visibility.strip().lower()
     if visibility not in {"public", "private"}:
@@ -4942,7 +5342,8 @@ def create_deck(payload: DeckCreateIn, request: Request, db: Session = Depends(g
 
 
 @app.get("/api/decks", response_model=DeckListResponse)
-def list_decks(viewer_profile_id: int | None = None, db: Session = Depends(get_db)) -> DeckListResponse:
+def list_decks(request: Request, viewer_profile_id: int | None = None, db: Session = Depends(get_db)) -> DeckListResponse:
+    viewer_id = authenticated_viewer_id(request, db)
     decks = db.execute(
         select(Deck)
         .options(
@@ -4962,12 +5363,13 @@ def list_decks(viewer_profile_id: int | None = None, db: Session = Depends(get_d
             deck.id,
         )
     )
-    items = [deck_summary_out(deck, viewer_profile_id=viewer_profile_id) for deck in public_decks]
+    items = [deck_summary_out(deck, viewer_profile_id=viewer_id) for deck in public_decks]
     return DeckListResponse(items=items)
 
 
 @app.get("/api/decks/{public_id}", response_model=DeckOut)
-def get_deck(public_id: str, viewer_profile_id: int | None = None, db: Session = Depends(get_db)) -> DeckOut:
+def get_deck(public_id: str, request: Request, viewer_profile_id: int | None = None, db: Session = Depends(get_db)) -> DeckOut:
+    viewer_id = authenticated_viewer_id(request, db)
     deck = db.execute(
         select(Deck)
         .options(
@@ -4979,13 +5381,14 @@ def get_deck(public_id: str, viewer_profile_id: int | None = None, db: Session =
     ).unique().scalar_one_or_none()
     if not deck:
         raise HTTPException(status_code=404, detail="Deck not found.")
-    if deck.visibility != "public" and deck.profile_id != viewer_profile_id:
+    if deck.visibility != "public" and deck.profile_id != viewer_id:
         raise HTTPException(status_code=403, detail="This deck is private.")
-    return deck_to_out(deck, viewer_profile_id=viewer_profile_id)
+    return deck_to_out(deck, viewer_profile_id=viewer_id)
 
 
 @app.get("/api/decks/{public_id}/history", response_model=DeckHistoryResponse)
-def get_deck_history(public_id: str, viewer_profile_id: int | None = None, db: Session = Depends(get_db)) -> DeckHistoryResponse:
+def get_deck_history(public_id: str, request: Request, viewer_profile_id: int | None = None, db: Session = Depends(get_db)) -> DeckHistoryResponse:
+    viewer_id = authenticated_viewer_id(request, db)
     deck = db.execute(
         select(Deck)
         .options(joinedload(Deck.revisions))
@@ -4993,7 +5396,7 @@ def get_deck_history(public_id: str, viewer_profile_id: int | None = None, db: S
     ).unique().scalar_one_or_none()
     if not deck:
         raise HTTPException(status_code=404, detail="Deck not found.")
-    if deck.visibility != "public" and deck.profile_id != viewer_profile_id:
+    if deck.visibility != "public" and deck.profile_id != viewer_id:
         raise HTTPException(status_code=403, detail="This deck is private.")
 
     items = []
@@ -5018,9 +5421,7 @@ def get_deck_history(public_id: str, viewer_profile_id: int | None = None, db: S
 @app.post("/api/decks/{public_id}/like", response_model=DeckSummaryOut)
 def toggle_deck_like(public_id: str, payload: DeckLikeToggleIn, request: Request, db: Session = Depends(get_db)) -> DeckSummaryOut:
     enforce_rate_limit("like", request, extra_key=str(payload.profile_id))
-    profile = db.get(Profile, payload.profile_id)
-    if not profile:
-        raise HTTPException(status_code=404, detail="Profile not found.")
+    profile = require_authenticated_profile(payload.profile_id, request, db)
 
     deck = db.execute(
         select(Deck)
@@ -5074,7 +5475,8 @@ def toggle_deck_like(public_id: str, payload: DeckLikeToggleIn, request: Request
 
 
 @app.delete("/api/decks/{public_id}")
-def delete_deck(public_id: str, profile_id: int, db: Session = Depends(get_db)) -> dict[str, str]:
+def delete_deck(public_id: str, profile_id: int, request: Request, db: Session = Depends(get_db)) -> dict[str, str]:
+    require_authenticated_profile(profile_id, request, db)
     deck = db.execute(
         select(Deck)
         .options(joinedload(Deck.profile), joinedload(Deck.items))
