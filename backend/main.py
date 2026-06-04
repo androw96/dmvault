@@ -100,7 +100,7 @@ SMTP_USE_TLS = os.getenv("SMTP_USE_TLS", "1").strip() != "0"
 EMAIL_VERIFICATION_TTL_HOURS = int(os.getenv("EMAIL_VERIFICATION_TTL_HOURS", "24"))
 EMAIL_RESEND_COOLDOWN_SECONDS = int(os.getenv("EMAIL_RESEND_COOLDOWN_SECONDS", "60"))
 PASSWORD_RESET_TTL_MINUTES = int(os.getenv("PASSWORD_RESET_TTL_MINUTES", "30"))
-DEFAULT_ADMIN_EMAIL = os.getenv("DEFAULT_ADMIN_EMAIL", "admin@paladinsvault.com").strip().lower()
+DEFAULT_ADMIN_EMAIL = os.getenv("DEFAULT_ADMIN_EMAIL", "konyaandras96@gmail.com").strip().lower()
 DEFAULT_ADMIN_USERNAME = slugify(os.getenv("DEFAULT_ADMIN_USERNAME", "paladins-vault-admin"))
 DEFAULT_ADMIN_PASSWORD_ENV = os.getenv("DEFAULT_ADMIN_PASSWORD")
 DEFAULT_ADMIN_PASSWORD = DEFAULT_ADMIN_PASSWORD_ENV or secrets.token_urlsafe(32)
