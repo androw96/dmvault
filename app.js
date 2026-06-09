@@ -90,14 +90,17 @@ const state = {
     search: "",
     civilization: "all",
     type: "all",
-    maxCost: 14
+    format: "all",
+    set: "all",
+    cost: 0
   },
   exploreSearch: "",
   exploreDeckSort: "likes",
   exploreDeckFilters: {
     containsCard: "",
     owner: "",
-    civilization: "all"
+    civilization: "all",
+    format: "all"
   },
   filterDefaults: {
     maxCost: 14
@@ -105,6 +108,7 @@ const state = {
   builderView: "image",
   builderSort: "mana",
   deckVisibility: "public",
+  deckFormat: "full-tcg",
   deckCoverImageUrl: null,
   builderReady: isBuilderLandingPage ? false : (isDeckEditorPage ? true : Boolean(hasPreloadedBuilderDeck)),
   builderModifyOpen: false,
@@ -186,12 +190,15 @@ const elements = {
   deckOwnerFollowButton: document.querySelector("#deck-owner-follow-button"),
   deckOwnerLikeButton: document.querySelector("#deck-owner-like-button"),
   deckVisibilitySelect: document.querySelector("#deck-visibility-select"),
+  deckFormatSelect: document.querySelector("#deck-format-select"),
   builderSortSelect: document.querySelector("#builder-sort"),
   searchInput: document.querySelector("#search-input"),
   searchSuggestions: document.querySelector("#search-suggestions"),
   selectedSearchCard: document.querySelector("#selected-search-card"),
   civilizationFilter: document.querySelector("#civilization-filter"),
   typeFilter: document.querySelector("#type-filter"),
+  formatFilter: document.querySelector("#format-filter"),
+  setFilter: document.querySelector("#set-filter"),
   costFilter: document.querySelector("#cost-filter"),
   costFilterValue: document.querySelector("#cost-filter-value"),
   catalogGrid: document.querySelector("#catalog-grid"),
@@ -309,6 +316,7 @@ const elements = {
   exploreFilterCardInput: document.querySelector("#explore-filter-card"),
   exploreFilterOwnerInput: document.querySelector("#explore-filter-owner"),
   exploreFilterCivilizationSelect: document.querySelector("#explore-filter-civilization"),
+  exploreFilterFormatSelect: document.querySelector("#explore-filter-format"),
   exploreDecksPanel: document.querySelector("#explore-decks-panel"),
   exploreUsersPanel: document.querySelector("#explore-users-panel"),
   profileAvatar: document.querySelector("#profile-avatar"),
@@ -694,11 +702,18 @@ async function initialize() {
           return;
         }
         await hydrateFilters();
-        const shouldPreloadCards = !isDeckEditorPage || state.filters.search || state.filters.civilization !== "all" || state.filters.type !== "all" || state.filters.maxCost !== state.filterDefaults.maxCost;
+        const shouldPreloadCards = !isDeckEditorPage
+          || state.filters.search
+          || state.filters.civilization !== "all"
+          || state.filters.type !== "all"
+          || state.filters.format !== "all"
+          || state.filters.set !== "all"
+          || state.filters.cost > 0;
         if (shouldPreloadCards) {
           await loadCards(isDeckEditorPage ? 60 : 160);
         }
       })(),
+      !needsCards(page) && elements.exploreFilterFormatSelect ? hydrateFilters() : Promise.resolve(),
       page === "profile" ? loadAllCards() : Promise.resolve(),
       needsProfileDecks(page) && state.activeProfileId ? loadProfileDecks(state.activeProfileId) : Promise.resolve(),
       state.activeProfileId ? loadNotifications() : Promise.resolve(),
@@ -3655,7 +3670,19 @@ function renderCardDetail(card) {
     elements.cardDetailText.textContent = card.text || "No ability text available.";
   }
   if (elements.cardDetailSet) {
-    elements.cardDetailSet.textContent = card.set_name || "-";
+    elements.cardDetailSet.replaceChildren();
+    if (card.set_name) {
+      const link = document.createElement("a");
+      link.className = "card-set-link";
+      link.href = window.location.protocol === "file:"
+        ? `./cards.html?set=${encodeURIComponent(card.set_name)}`
+        : `/cards?set=${encodeURIComponent(card.set_name)}`;
+      link.textContent = card.set_name;
+      link.title = `View every card from ${card.set_name}`;
+      elements.cardDetailSet.append(link);
+    } else {
+      elements.cardDetailSet.textContent = "-";
+    }
   }
   if (elements.cardDetailNumber) {
     elements.cardDetailNumber.textContent = card.collector_number || "-";
@@ -3735,6 +3762,7 @@ function scheduleCardSearch(limit = null) {
     window.clearTimeout(state.cardSearchDebounce);
   }
   state.cardSearchDebounce = window.setTimeout(async () => {
+    await loadAvailableManaCosts();
     await loadCards(limit ?? (isDeckEditorPage ? 60 : 160));
     renderSearchSuggestions();
     renderCards();
@@ -4174,6 +4202,14 @@ function bindEvents() {
     markDeckDirty(`Changed visibility to ${state.deckVisibility === "private" ? "Private" : "Public"}`);
     renderBuilder();
   });
+  elements.deckFormatSelect?.addEventListener("change", (event) => {
+    state.deckFormat = event.target.value || "full-tcg";
+    persistDeckSnapshot();
+    markDeckDirty(`Changed deck format to ${event.target.selectedOptions?.[0]?.textContent || "Full TCG"}`);
+    renderBuilder();
+    renderProfileDecks();
+    renderExploreDecks();
+  });
   elements.deckCoverSelect?.addEventListener("change", (event) => {
     state.deckCoverImageUrl = event.target.value || deriveAutomaticDeckCover();
     persistDeckSnapshot();
@@ -4227,9 +4263,21 @@ function bindEvents() {
     scheduleCardSearch(isDeckEditorPage ? 48 : 120);
   });
 
-  elements.costFilter?.addEventListener("input", (event) => {
-    state.filters.maxCost = Number(event.target.value);
-    elements.costFilterValue.textContent = event.target.value;
+  elements.formatFilter?.addEventListener("change", (event) => {
+    state.filters.format = event.target.value;
+    scheduleCardSearch(isDeckEditorPage ? 48 : 120);
+  });
+
+  elements.setFilter?.addEventListener("change", (event) => {
+    state.filters.set = event.target.value;
+    scheduleCardSearch(isDeckEditorPage ? 48 : 120);
+  });
+
+  elements.costFilter?.addEventListener("change", (event) => {
+    state.filters.cost = Number(event.target.value);
+    if (elements.costFilterValue) {
+      elements.costFilterValue.textContent = state.filters.cost > 0 ? event.target.value : "Any";
+    }
     scheduleCardSearch(isDeckEditorPage ? 48 : 120);
   });
   elements.resetFiltersButton?.addEventListener("click", resetDeckEditorFilters);
@@ -4386,6 +4434,9 @@ function syncBuilderViewControl() {
   if (elements.builderViewSelect) {
     elements.builderViewSelect.value = state.builderView === "text" ? "text" : "image";
   }
+  if (elements.deckFormatSelect) {
+    elements.deckFormatSelect.value = state.deckFormat || "full-tcg";
+  }
 }
 
 function resetDeckEditorFilters() {
@@ -4393,12 +4444,16 @@ function resetDeckEditorFilters() {
   state.selectedSearchCardId = null;
   state.filters.civilization = "all";
   state.filters.type = "all";
-  state.filters.maxCost = state.filterDefaults.maxCost;
+  state.filters.format = "all";
+  state.filters.set = "all";
+  state.filters.cost = 0;
   if (elements.searchInput) elements.searchInput.value = "";
   if (elements.civilizationFilter) elements.civilizationFilter.value = "all";
   if (elements.typeFilter) elements.typeFilter.value = "all";
-  if (elements.costFilter) elements.costFilter.value = String(state.filterDefaults.maxCost);
-  if (elements.costFilterValue) elements.costFilterValue.textContent = String(state.filterDefaults.maxCost);
+  if (elements.formatFilter) elements.formatFilter.value = "all";
+  if (elements.setFilter) elements.setFilter.value = "all";
+  if (elements.costFilter) elements.costFilter.value = "0";
+  if (elements.costFilterValue) elements.costFilterValue.textContent = "Any";
   scheduleCardSearch(isDeckEditorPage ? 48 : 120);
 }
 
@@ -4450,39 +4505,77 @@ async function hydrateDeckCards() {
 }
 
 async function hydrateFilters() {
-  if (!elements.civilizationFilter || !elements.typeFilter) {
+  if (!elements.civilizationFilter && !elements.typeFilter && !elements.formatFilter && !elements.setFilter && !elements.deckFormatSelect && !elements.exploreFilterFormatSelect) {
     return;
   }
 
   const metadata = await fetchJson(`${API_BASE}/metadata`);
-  fillSelect(elements.civilizationFilter, metadata.civilizations);
-  fillSelect(elements.typeFilter, metadata.types);
-  elements.costFilter.max = String(metadata.max_cost ?? 14);
+  const formats = metadata.formats?.length ? metadata.formats : [{ value: "full-tcg", label: "Full TCG" }];
+  fillSelect(elements.civilizationFilter, metadata.civilizations || []);
+  fillSelect(elements.typeFilter, metadata.types || []);
+  fillSelect(elements.formatFilter, formats);
+  fillSelect(elements.setFilter, metadata.sets || []);
+  fillSelect(elements.deckFormatSelect, formats, { preserveFirstOption: false });
+  fillSelect(elements.exploreFilterFormatSelect, formats);
+
+  applyCardFiltersFromLocation();
+
   state.filterDefaults.maxCost = metadata.max_cost ?? 14;
-  state.filters.maxCost = state.filterDefaults.maxCost;
-  elements.costFilter.value = String(state.filters.maxCost);
-  elements.costFilterValue.textContent = String(state.filters.maxCost);
+  state.filters.cost = Math.min(state.filters.cost, state.filterDefaults.maxCost);
+  if (elements.civilizationFilter) elements.civilizationFilter.value = state.filters.civilization;
+  if (elements.typeFilter) elements.typeFilter.value = state.filters.type;
+  if (elements.formatFilter) elements.formatFilter.value = state.filters.format;
+  if (elements.setFilter) elements.setFilter.value = state.filters.set;
+  if (elements.searchInput) elements.searchInput.value = state.filters.search;
+  if (elements.deckFormatSelect) elements.deckFormatSelect.value = state.deckFormat || "full-tcg";
+  if (elements.exploreFilterFormatSelect) elements.exploreFilterFormatSelect.value = state.exploreDeckFilters.format;
+  if (elements.costFilter) {
+    await loadAvailableManaCosts();
+  }
+  if (elements.costFilterValue) {
+    elements.costFilterValue.textContent = state.filters.cost > 0 ? String(state.filters.cost) : "Any";
+  }
 }
 
-function fillSelect(select, values) {
+function applyCardFiltersFromLocation() {
+  if (page !== "cards" && !isDeckEditorPage) {
+    return;
+  }
+  const params = new URLSearchParams(window.location.search);
+  const search = params.get("q") || params.get("search");
+  const setName = params.get("set") || params.get("set_name");
+  const format = params.get("format");
+  if (search) state.filters.search = search;
+  if (setName) state.filters.set = setName;
+  if (format) state.filters.format = format;
+}
+
+function fillSelect(select, values, options = {}) {
   if (!select || select.dataset.hydrated === "true") {
     return;
   }
+  if (options.preserveFirstOption === false) {
+    select.replaceChildren();
+  }
   for (const value of values) {
     const option = document.createElement("option");
-    option.value = value;
-    option.textContent = value;
+    if (value && typeof value === "object") {
+      option.value = value.value;
+      option.textContent = value.label;
+      if (value.description) {
+        option.title = value.description;
+      }
+    } else {
+      option.value = value;
+      option.textContent = value;
+    }
     select.append(option);
   }
   select.dataset.hydrated = "true";
 }
 
 async function loadCards(limit = 160) {
-  const params = new URLSearchParams();
-  if (state.filters.search) params.set("search", state.filters.search);
-  if (state.filters.civilization !== "all") params.set("civilization", state.filters.civilization);
-  if (state.filters.type !== "all") params.set("type", state.filters.type);
-  params.set("max_cost", String(state.filters.maxCost));
+  const params = buildCardFilterParams({ includeCost: true });
   params.set("limit", String(limit));
 
   const requestId = ++state.cardsRequestId;
@@ -4495,6 +4588,52 @@ async function loadCards(limit = 160) {
     state.cardIndex[String(card.id)] = card;
   }
   state.cardsLoaded = true;
+}
+
+async function loadAvailableManaCosts() {
+  if (!elements.costFilter) {
+    return;
+  }
+  const params = buildCardFilterParams({ includeCost: false });
+  const payload = await fetchJson(`${API_BASE}/cards/costs?${params.toString()}`);
+  syncManaCostOptions(payload.costs || []);
+}
+
+function buildCardFilterParams({ includeCost = true } = {}) {
+  const params = new URLSearchParams();
+  if (state.filters.search) params.set("search", state.filters.search);
+  if (state.filters.civilization !== "all") params.set("civilization", state.filters.civilization);
+  if (state.filters.type !== "all") params.set("type", state.filters.type);
+  if (state.filters.format !== "all") params.set("format", state.filters.format);
+  if (state.filters.set !== "all") params.set("set_name", state.filters.set);
+  if (includeCost && state.filters.cost > 0) params.set("cost", String(state.filters.cost));
+  return params;
+}
+
+function syncManaCostOptions(costs) {
+  if (!elements.costFilter) {
+    return;
+  }
+  const availableCosts = [...new Set(costs.map((value) => Number(value)).filter((value) => Number.isFinite(value) && value > 0))]
+    .sort((left, right) => left - right);
+  if (state.filters.cost > 0 && !availableCosts.includes(state.filters.cost)) {
+    state.filters.cost = 0;
+  }
+  elements.costFilter.replaceChildren();
+  const anyOption = document.createElement("option");
+  anyOption.value = "0";
+  anyOption.textContent = "Any";
+  elements.costFilter.append(anyOption);
+  for (const cost of availableCosts) {
+    const option = document.createElement("option");
+    option.value = String(cost);
+    option.textContent = String(cost);
+    elements.costFilter.append(option);
+  }
+  elements.costFilter.value = String(state.filters.cost);
+  if (elements.costFilterValue) {
+    elements.costFilterValue.textContent = state.filters.cost > 0 ? String(state.filters.cost) : "Any";
+  }
 }
 
 async function loadAllCards() {
@@ -4642,6 +4781,7 @@ function maybeLoadLocalDeck() {
     state.deck = payload.deck ?? {};
     state.loadedShareId = payload.shareId ?? null;
     state.deckVisibility = payload.visibility === "private" ? "private" : "public";
+    state.deckFormat = payload.deckFormat || "full-tcg";
     state.deckCoverImageUrl = payload.coverImageUrl ?? null;
     state.hasUnsavedProfileChanges = Boolean(payload.dirty);
     if (elements.deckTitleInput && payload.title) {
@@ -4649,6 +4789,9 @@ function maybeLoadLocalDeck() {
     }
   if (elements.deckVisibilitySelect) {
     elements.deckVisibilitySelect.value = state.deckVisibility;
+  }
+  if (elements.deckFormatSelect) {
+    elements.deckFormatSelect.value = state.deckFormat;
   }
   if (elements.pdfExportLink && state.loadedShareId) {
     elements.pdfExportLink.href = withViewer(`${API_BASE}/decks/${state.loadedShareId}/pdf`);
@@ -5973,16 +6116,18 @@ function renderExploreDecks() {
       || normalizedUsername(deck.owner?.username || "").includes(state.exploreDeckFilters.owner);
     const matchesCivilization = state.exploreDeckFilters.civilization === "all"
       || (deck.civilizations || []).includes(state.exploreDeckFilters.civilization);
+    const matchesFormat = state.exploreDeckFilters.format === "all"
+      || deck.deck_format === state.exploreDeckFilters.format;
     const matchesCard = !state.exploreDeckFilters.containsCard
       || (deck.card_names || []).some((name) => name.toLowerCase().includes(state.exploreDeckFilters.containsCard));
-    return matchesSearch && matchesOwner && matchesCivilization && matchesCard;
+    return matchesSearch && matchesOwner && matchesCivilization && matchesFormat && matchesCard;
   }).sort(compareExploreDecks);
   const deckOfTheDay = pickDeckOfTheDay(filteredDecks);
 
   if (filteredDecks.length === 0) {
     const message = document.createElement("p");
     message.className = "hero-text";
-    message.textContent = (state.exploreSearch || state.exploreDeckFilters.owner || state.exploreDeckFilters.containsCard || state.exploreDeckFilters.civilization !== "all")
+    message.textContent = (state.exploreSearch || state.exploreDeckFilters.owner || state.exploreDeckFilters.containsCard || state.exploreDeckFilters.civilization !== "all" || state.exploreDeckFilters.format !== "all")
       ? "No decks matched the current filters."
       : "No saved decks have been published yet.";
     elements.exploreDecks.append(message);
@@ -6060,9 +6205,10 @@ function buildExploreFeaturedDeckShelf(deckOfTheDay, mostLikedDecks) {
   return shelf;
 }
 
-function dailyDeckSeed() {
-  const today = new Date();
-  return `${today.getFullYear()}-${today.getMonth() + 1}-${today.getDate()}`;
+function dailyDeckSeed(offsetDays = 0) {
+  const day = new Date();
+  day.setDate(day.getDate() + offsetDays);
+  return `${day.getFullYear()}-${day.getMonth() + 1}-${day.getDate()}`;
 }
 
 function seededDeckScore(deck, seed) {
@@ -6079,7 +6225,19 @@ function pickDeckOfTheDay(decks) {
     return null;
   }
   const seed = dailyDeckSeed();
-  return [...decks].sort((left, right) => seededDeckScore(left, seed) - seededDeckScore(right, seed))[0];
+  const yesterdaySeed = dailyDeckSeed(-1);
+  const yesterdayDeck = [...decks].sort((left, right) => seededDeckScore(left, yesterdaySeed) - seededDeckScore(right, yesterdaySeed))[0];
+  const candidates = decks.length > 1
+    ? decks.filter((deck) => dailyItemId(deck, "deck") !== dailyItemId(yesterdayDeck, "deck"))
+    : decks;
+  return [...candidates].sort((left, right) => seededDeckScore(left, seed) - seededDeckScore(right, seed))[0];
+}
+
+function dailyItemId(item, fallbackPrefix = "item") {
+  if (!item) {
+    return "";
+  }
+  return String(item.public_id ?? item.id ?? item.slug ?? item.name ?? item.title ?? `${fallbackPrefix}:${JSON.stringify(item)}`);
 }
 
 function buildDeckSummaryCard(deck, options = {}) {
@@ -6094,6 +6252,7 @@ function buildDeckSummaryCard(deck, options = {}) {
     <div class="profile-deck-cover" style="background-image: url('${escapeHtml(deck.cover_image_url || DEFAULT_LOGO_URL)}')"></div>
     <strong>${escapeHtml(deck.title)}</strong>
     <span>${deck.card_total} cards • ${deck.updated_at_label}</span>
+    <span class="deck-format-pill">${escapeHtml(deck.deck_format_label || "Full TCG")}</span>
     <small>${deck.owner ? `by ${escapeHtml(displayUsername(deck.owner.username))}` : "Community deck"}</small>
   `;
 
@@ -6304,7 +6463,12 @@ function pickDuelistOfTheDay(profiles) {
     return null;
   }
   const seed = dailyDeckSeed();
-  return [...profiles].sort((left, right) => seededDeckScore(left, seed) - seededDeckScore(right, seed))[0];
+  const yesterdaySeed = dailyDeckSeed(-1);
+  const yesterdayProfile = [...profiles].sort((left, right) => seededDeckScore(left, yesterdaySeed) - seededDeckScore(right, yesterdaySeed))[0];
+  const candidates = profiles.length > 1
+    ? profiles.filter((profile) => dailyItemId(profile, "profile") !== dailyItemId(yesterdayProfile, "profile"))
+    : profiles;
+  return [...candidates].sort((left, right) => seededDeckScore(left, seed) - seededDeckScore(right, seed))[0];
 }
 
 function renderAvatarPresetChoosers() {
@@ -6648,6 +6812,9 @@ function openExploreFiltersModal() {
   if (elements.exploreFilterCivilizationSelect) {
     elements.exploreFilterCivilizationSelect.value = state.exploreDeckFilters.civilization;
   }
+  if (elements.exploreFilterFormatSelect) {
+    elements.exploreFilterFormatSelect.value = state.exploreDeckFilters.format;
+  }
   if (elements.exploreFiltersModal) {
     elements.exploreFiltersModal.hidden = false;
   }
@@ -6663,15 +6830,17 @@ function applyExploreFilters() {
   state.exploreDeckFilters.containsCard = elements.exploreFilterCardInput?.value.trim().toLowerCase() || "";
   state.exploreDeckFilters.owner = elements.exploreFilterOwnerInput?.value.trim().toLowerCase() || "";
   state.exploreDeckFilters.civilization = elements.exploreFilterCivilizationSelect?.value || "all";
+  state.exploreDeckFilters.format = elements.exploreFilterFormatSelect?.value || "all";
   renderExploreDecks();
   closeExploreFiltersModal();
 }
 
 function resetExploreFilters() {
-  state.exploreDeckFilters = { containsCard: "", owner: "", civilization: "all" };
+  state.exploreDeckFilters = { containsCard: "", owner: "", civilization: "all", format: "all" };
   if (elements.exploreFilterCardInput) elements.exploreFilterCardInput.value = "";
   if (elements.exploreFilterOwnerInput) elements.exploreFilterOwnerInput.value = "";
   if (elements.exploreFilterCivilizationSelect) elements.exploreFilterCivilizationSelect.value = "all";
+  if (elements.exploreFilterFormatSelect) elements.exploreFilterFormatSelect.value = "all";
   renderExploreDecks();
 }
 
@@ -7384,6 +7553,7 @@ async function loadDeckIntoWorkspace(publicId, options = {}) {
   state.loadedShareId = payload.public_id;
   state.deck = Object.fromEntries(payload.cards.map((entry) => [String(entry.card.id), entry.quantity]));
   state.deckVisibility = payload.visibility === "private" ? "private" : "public";
+  state.deckFormat = payload.deck_format || "full-tcg";
   state.deckCoverImageUrl = payload.cover_image_url || null;
   state.loadedDeckOwner = payload.owner || null;
   state.loadedDeckLikeCount = payload.like_count || 0;
@@ -7401,6 +7571,9 @@ async function loadDeckIntoWorkspace(publicId, options = {}) {
   }
   if (elements.deckVisibilitySelect) {
     elements.deckVisibilitySelect.value = state.deckVisibility;
+  }
+  if (elements.deckFormatSelect) {
+    elements.deckFormatSelect.value = state.deckFormat;
   }
   if (elements.pdfExportLink) {
     elements.pdfExportLink.href = withViewer(`${API_BASE}/decks/${payload.public_id}/pdf`);
@@ -7454,11 +7627,15 @@ async function loadPrintDeckSelection(value) {
   state.loadedShareId = payload.public_id;
   state.deck = Object.fromEntries(payload.cards.map((entry) => [String(entry.card.id), entry.quantity]));
   state.deckCoverImageUrl = payload.cover_image_url || null;
+  state.deckFormat = payload.deck_format || "full-tcg";
   for (const entry of payload.cards) {
     state.cardIndex[String(entry.card.id)] = entry.card;
   }
   if (elements.deckTitleInput) {
     elements.deckTitleInput.value = payload.title;
+  }
+  if (elements.deckFormatSelect) {
+    elements.deckFormatSelect.value = state.deckFormat;
   }
   if (elements.printPdfExportLink) {
     elements.printPdfExportLink.href = withViewer(`${API_BASE}/decks/${payload.public_id}/pdf`);
@@ -7494,6 +7671,7 @@ function startNewDeck(options = {}) {
   state.deck = {};
   state.loadedShareId = null;
   state.deckVisibility = "public";
+  state.deckFormat = "full-tcg";
   state.deckCoverImageUrl = null;
   state.deckOwnerId = state.activeProfileId;
   state.loadedDeckOwner = activeProfile();
@@ -7507,6 +7685,9 @@ function startNewDeck(options = {}) {
   }
   if (elements.deckVisibilitySelect) {
     elements.deckVisibilitySelect.value = state.deckVisibility;
+  }
+  if (elements.deckFormatSelect) {
+    elements.deckFormatSelect.value = state.deckFormat;
   }
   resetDeckExportLinks();
   state.deckHistory = [];
@@ -7753,6 +7934,10 @@ function renderBuilder() {
     elements.deckVisibilitySelect.value = state.deckVisibility;
     elements.deckVisibilitySelect.disabled = state.deckReadOnly;
   }
+  if (elements.deckFormatSelect) {
+    elements.deckFormatSelect.value = state.deckFormat || "full-tcg";
+    elements.deckFormatSelect.disabled = state.deckReadOnly;
+  }
   if (elements.deckCoverSelect) {
     elements.deckCoverSelect.disabled = state.deckReadOnly || entries.length === 0;
   }
@@ -7833,7 +8018,12 @@ function pickCardOfTheDay(cards) {
     return null;
   }
   const seed = dailyDeckSeed();
-  return [...cards].sort((left, right) => seededCardScore(left, seed) - seededCardScore(right, seed))[0];
+  const yesterdaySeed = dailyDeckSeed(-1);
+  const yesterdayCard = [...cards].sort((left, right) => seededCardScore(left, yesterdaySeed) - seededCardScore(right, yesterdaySeed))[0];
+  const candidates = cards.length > 1
+    ? cards.filter((card) => dailyItemId(card, "card") !== dailyItemId(yesterdayCard, "card"))
+    : cards;
+  return [...candidates].sort((left, right) => seededCardScore(left, seed) - seededCardScore(right, seed))[0];
 }
 
 function renderCardOfTheDay() {
@@ -8324,11 +8514,15 @@ async function importTextDeck() {
   state.deck = nextDeck;
   state.loadedShareId = null;
   state.deckVisibility = "public";
+  state.deckFormat = "full-tcg";
   state.deckCoverImageUrl = null;
   state.deckReadOnly = false;
   state.deckOwnerId = state.activeProfileId;
   if (elements.deckVisibilitySelect) {
     elements.deckVisibilitySelect.value = state.deckVisibility;
+  }
+  if (elements.deckFormatSelect) {
+    elements.deckFormatSelect.value = state.deckFormat;
   }
   await hydrateDeckCards();
   state.deckDirtyToken += 1;
@@ -8512,6 +8706,7 @@ async function saveDeckToProfile(options = {}) {
         public_id: state.loadedShareId,
         title,
         visibility: state.deckVisibility,
+        deck_format: state.deckFormat,
         cover_image_url: state.deckCoverImageUrl || deriveAutomaticDeckCover(),
         profile_id: state.activeProfileId,
         change_note: state.pendingChangeNote,
@@ -8529,6 +8724,7 @@ async function saveDeckToProfile(options = {}) {
 
   state.loadedShareId = payload.public_id;
   state.deckVisibility = payload.visibility === "private" ? "private" : "public";
+  state.deckFormat = payload.deck_format || state.deckFormat || "full-tcg";
   state.deckCoverImageUrl = payload.cover_image_url || state.deckCoverImageUrl || deriveAutomaticDeckCover();
   state.deckOwnerId = state.activeProfileId;
   state.loadedDeckOwner = activeProfile();
@@ -8537,6 +8733,9 @@ async function saveDeckToProfile(options = {}) {
   state.deckReadOnly = false;
   if (elements.deckVisibilitySelect) {
     elements.deckVisibilitySelect.value = state.deckVisibility;
+  }
+  if (elements.deckFormatSelect) {
+    elements.deckFormatSelect.value = state.deckFormat;
   }
   if (elements.pdfExportLink) {
     elements.pdfExportLink.href = withViewer(`${API_BASE}/decks/${payload.public_id}/pdf`);
@@ -8587,6 +8786,7 @@ async function duplicateDeckToProfile(publicId) {
     body: JSON.stringify({
       title: duplicateTitle,
       visibility: "private",
+      deck_format: payload.deck_format || "full-tcg",
       profile_id: state.activeProfileId,
       change_note: "Duplicated deck",
       cards
@@ -9117,6 +9317,7 @@ function persistDeckSnapshot() {
   const payload = {
     title: elements.deckTitleInput?.value.trim() || "Paladin's Vault Deck",
     visibility: state.deckVisibility,
+    deckFormat: state.deckFormat,
     coverImageUrl: state.deckCoverImageUrl,
     deck: state.deck,
     shareId: state.loadedShareId,
@@ -9253,7 +9454,24 @@ function expandedDeckEntries(sortMode = "mana") {
         || left.card.name.localeCompare(right.card.name);
     });
   }
+  if (sortMode === "type") {
+    return entries.sort((left, right) => {
+      const leftRank = deckTypeSortRank(left.card.type);
+      const rightRank = deckTypeSortRank(right.card.type);
+      return leftRank - rightRank
+        || left.card.cost - right.card.cost
+        || left.card.name.localeCompare(right.card.name);
+    });
+  }
   return entries.sort((left, right) => left.card.cost - right.card.cost || left.card.name.localeCompare(right.card.name));
+}
+
+function deckTypeSortRank(type = "") {
+  const normalized = type.toLowerCase();
+  if (normalized.includes("evolution creature")) return 1;
+  if (normalized.includes("creature")) return 0;
+  if (normalized.includes("spell")) return 2;
+  return 3;
 }
 
 function expandDeckCards() {

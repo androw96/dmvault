@@ -1004,6 +1004,18 @@ input[type="search"] {
     background 160ms ease;
 }
 
+.field select option,
+select option {
+  color: #061421;
+  background: #f4fbff;
+}
+
+.field select option:checked,
+select option:checked {
+  color: #ffffff;
+  background: #0f4f7a;
+}
+
 .field select:hover,
 .field input:hover,
 input[type="search"]:hover {
@@ -1268,6 +1280,22 @@ textarea:focus {
 .profile-deck-card small {
   color: var(--muted);
   line-height: 1.45;
+}
+
+.profile-deck-card .deck-format-pill {
+  width: fit-content;
+  max-width: 100%;
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid rgba(124, 231, 255, 0.24);
+  border-radius: 999px;
+  padding: 5px 9px;
+  background:
+    linear-gradient(135deg, rgba(124, 231, 255, 0.12), rgba(255, 222, 118, 0.08)),
+    rgba(7, 23, 39, 0.72);
+  color: #dff8ff;
+  font-size: 0.72rem;
+  font-weight: 800;
 }
 
 .profile-deck-actions {
@@ -1825,6 +1853,22 @@ textarea:focus {
   align-items: end;
 }
 
+body[data-page="explore-decks"] .page-hero {
+  padding: 18px;
+}
+
+body[data-page="cards"] .page-hero {
+  padding: 18px;
+}
+
+body[data-page="explore-decks"] .explore-controls {
+  width: 100%;
+}
+
+body[data-page="cards"] .explore-controls {
+  width: 100%;
+}
+
 .explore-filter-actions {
   align-self: end;
 }
@@ -1870,9 +1914,11 @@ textarea:focus {
 }
 
 .workspace-control-stack {
-  display: grid;
-  gap: 14px;
-  justify-items: end;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  justify-content: flex-end;
+  align-items: flex-start;
 }
 
 .view-panel {
@@ -1888,8 +1934,9 @@ textarea:focus {
 }
 
 .view-panel-dropdown {
+  position: relative;
   min-width: 210px;
-  width: min(100%, 620px);
+  width: auto;
 }
 
 .view-panel-toggle {
@@ -1898,7 +1945,7 @@ textarea:focus {
 }
 
 .view-panel-dropdown[open] {
-  padding-bottom: 16px;
+  z-index: 24;
 }
 
 .view-panel-dropdown:not([open]) {
@@ -1917,6 +1964,20 @@ textarea:focus {
   grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
   gap: 12px;
   align-items: stretch;
+}
+
+.view-panel-dropdown[open] .view-panel-grid {
+  position: absolute;
+  top: calc(100% + 10px);
+  right: 0;
+  z-index: 30;
+  width: min(620px, calc(100vw - 44px));
+  padding: 14px;
+  border-radius: 20px;
+  border: 1px solid rgba(157, 213, 255, 0.18);
+  background:
+    linear-gradient(145deg, rgba(18, 48, 78, 0.98), rgba(7, 17, 30, 0.98));
+  box-shadow: 0 24px 52px rgba(1, 8, 18, 0.38);
 }
 
 .view-panel-grid > .field,
@@ -2036,6 +2097,10 @@ textarea:focus {
   min-width: 170px;
 }
 
+.builder-format-field {
+  min-width: 210px;
+}
+
 .builder-view-field {
   min-width: 170px;
 }
@@ -2103,7 +2168,8 @@ textarea:focus {
 }
 
 .deck-workspace .deck-title-row > .field > span,
-.deck-workspace .workspace-top .export-select-field > span {
+.deck-workspace .workspace-top .export-select-field > span,
+.deck-workspace .workspace-top .workspace-format-field > span {
   margin: 0;
   color: #dcecff;
   text-transform: uppercase;
@@ -2123,7 +2189,8 @@ textarea:focus {
   align-items: stretch;
 }
 
-.deck-workspace .workspace-top .export-select-field {
+.deck-workspace .workspace-top .export-select-field,
+.deck-workspace .workspace-top .workspace-format-field {
   min-width: 210px;
   padding: 12px 14px;
   border-radius: 18px;
@@ -2133,7 +2200,8 @@ textarea:focus {
     rgba(255, 255, 255, 0.035);
 }
 
-.deck-workspace .workspace-top .export-select-field > span {
+.deck-workspace .workspace-top .export-select-field > span,
+.deck-workspace .workspace-top .workspace-format-field > span {
   margin-bottom: 8px;
 }
 
@@ -4167,6 +4235,18 @@ input[type="range"] {
   font-size: 0.82rem;
   letter-spacing: 0.08em;
   text-transform: uppercase;
+}
+
+.card-set-link {
+  color: #c6f5ff;
+  font-weight: 800;
+  text-decoration: none;
+  border-bottom: 1px solid rgba(124, 231, 255, 0.42);
+}
+
+.card-set-link:hover {
+  color: #fff0a8;
+  border-bottom-color: rgba(255, 222, 118, 0.7);
 }
 
 .card-detail-text-block {

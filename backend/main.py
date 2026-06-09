@@ -84,7 +84,7 @@ from .schemas import (
     ProfileUpdateIn,
     VerificationResendIn,
 )
-from .seed import seed_cards_if_needed
+from .seed import LEGAL_TCG_SET_NAMES, seed_cards_if_needed
 from .utils import canonical_card_name, format_image_path, format_illustration_path, generate_public_id, slugify
 
 FRONTEND_DIR = BASE_DIR.parent
@@ -109,7 +109,7 @@ RATE_LIMIT_BUCKETS: dict[str, list[float]] = {}
 RATE_LIMIT_MAX_BUCKETS = int(os.getenv("RATE_LIMIT_MAX_BUCKETS", "5000"))
 RATE_LIMIT_PRUNE_INTERVAL_SECONDS = int(os.getenv("RATE_LIMIT_PRUNE_INTERVAL_SECONDS", "60"))
 RATE_LIMIT_LAST_PRUNE = 0.0
-ASSET_VERSION = "20260603avatarsave"
+ASSET_VERSION = "20260609dailyrotate"
 AUTH_TOKEN_TTL_SECONDS = int(os.getenv("AUTH_TOKEN_TTL_SECONDS", str(60 * 60 * 24 * 14)))
 AUTH_SECRET_KEY = os.getenv("AUTH_SECRET_KEY", os.getenv("SECRET_KEY", DEFAULT_ADMIN_PASSWORD)).encode("utf-8")
 AUTH_COOKIE_NAME = os.getenv("AUTH_COOKIE_NAME", "pv_session")
@@ -131,6 +131,43 @@ RATE_LIMIT_RULES = {
     "admin_notify": (20, 300),
     "admin_ban": (30, 300),
 }
+FORMAT_DEFINITIONS = [
+    {
+        "value": "full-tcg",
+        "label": "Full TCG",
+        "description": "All English TCG cards currently available in Paladin's Vault.",
+        "max_set": None,
+        "include_promos": True,
+    },
+    {
+        "value": "tcg-dm01-dm05",
+        "label": "TCG DM-01 to DM-05",
+        "description": "Early TCG through Survivors of the Megapocalypse.",
+        "max_set": 5,
+        "include_promos": False,
+    },
+    {
+        "value": "tcg-dm01-dm09",
+        "label": "TCG DM-01 to DM-09",
+        "description": "Classic TCG through Fatal Brood of Infinite Ruin.",
+        "max_set": 9,
+        "include_promos": False,
+    },
+    {
+        "value": "tcg-dm01-dm12",
+        "label": "TCG DM-01 to DM-12",
+        "description": "Classic English TCG through Thrash of the Hybrid Megacreatures.",
+        "max_set": 12,
+        "include_promos": False,
+    },
+    {
+        "value": "promotional",
+        "label": "Promotional",
+        "description": "Promotional cards only.",
+        "promotional_only": True,
+    },
+]
+FORMAT_BY_VALUE = {item["value"]: item for item in FORMAT_DEFINITIONS}
 
 app = FastAPI(title="Paladin's Vault")
 app.add_middleware(GZipMiddleware, minimum_size=1024)
@@ -230,6 +267,49 @@ def mask_email(email: str | None) -> str:
     else:
         masked_local = f"{local[:2]}{'*' * min(len(local) - 2, 6)}"
     return f"{masked_local}@{domain}"
+
+
+def set_code_number(set_name: str | None) -> int | None:
+    if not set_name:
+        return None
+    match = re.search(r"\bDM-(\d{2})\b", set_name)
+    return int(match.group(1)) if match else None
+
+
+def format_label(value: str | None) -> str:
+    return str(FORMAT_BY_VALUE.get(normalize_deck_format(value), FORMAT_BY_VALUE["full-tcg"])["label"])
+
+
+def normalize_deck_format(value: str | None) -> str:
+    normalized = (value or "full-tcg").strip().lower()
+    return normalized if normalized in FORMAT_BY_VALUE else "full-tcg"
+
+
+def card_matches_format(card: Card, deck_format: str | None) -> bool:
+    definition = FORMAT_BY_VALUE.get(normalize_deck_format(deck_format), FORMAT_BY_VALUE["full-tcg"])
+    set_name = card.set_name or ""
+    if definition.get("promotional_only"):
+        return set_name == "Promotional"
+    max_set = definition.get("max_set")
+    if max_set is None:
+        return True
+    number = set_code_number(set_name)
+    return number is not None and 1 <= number <= int(max_set)
+
+
+def apply_format_filter(query: Select[tuple[Card]], deck_format: str | None) -> Select[tuple[Card]]:
+    definition = FORMAT_BY_VALUE.get(normalize_deck_format(deck_format), FORMAT_BY_VALUE["full-tcg"])
+    if definition.get("promotional_only"):
+        return query.where(Card.set_name == "Promotional")
+    max_set = definition.get("max_set")
+    if max_set is None:
+        return query
+    allowed_sets = [
+        set_name
+        for set_name in LEGAL_TCG_SET_NAMES
+        if (number := set_code_number(set_name)) is not None and 1 <= number <= int(max_set)
+    ]
+    return query.where(Card.set_name.in_(allowed_sets))
 
 
 def hash_password(password: str) -> str:
@@ -700,12 +780,16 @@ This message was sent from the Paladin's Vault admin dashboard.
     return message
 
 
-def build_admin_2fa_message(profile: Profile, code: str) -> EmailMessage:
+def admin_security_email(profile: Profile) -> str | None:
+    return DEFAULT_ADMIN_EMAIL if profile.is_admin and DEFAULT_ADMIN_EMAIL else profile.email
+
+
+def build_admin_2fa_message(profile: Profile, code: str, recipient_email: str) -> EmailMessage:
     subject = "Your Paladin's Vault admin security code"
     message = EmailMessage()
     message["Subject"] = subject
     message["From"] = f"Paladin's Vault <{SMTP_FROM_EMAIL}>"
-    message["To"] = profile.email
+    message["To"] = recipient_email
     message.set_content(
         f"""Hello {profile.username},
 
@@ -746,7 +830,8 @@ def prune_admin_2fa_challenges() -> None:
 
 
 def issue_admin_2fa_challenge(profile: Profile, request: Request, db: Session) -> str:
-    if not profile.email:
+    recipient_email = admin_security_email(profile)
+    if not recipient_email:
         raise HTTPException(status_code=400, detail="Admin account needs an email address for 2FA.")
     if not email_delivery_configured():
         raise HTTPException(status_code=503, detail="Admin 2FA email delivery is not configured.")
@@ -759,8 +844,8 @@ def issue_admin_2fa_challenge(profile: Profile, request: Request, db: Session) -
         "expires_at": int(time.time()) + ADMIN_2FA_TTL_SECONDS,
         "attempts": 0,
     }
-    send_email_message(build_admin_2fa_message(profile, code))
-    create_admin_audit(db, profile.id, "admin_2fa_sent", detail=f"ip={client_ip(request)}")
+    send_email_message(build_admin_2fa_message(profile, code, recipient_email))
+    create_admin_audit(db, profile.id, "admin_2fa_sent", detail=f"ip={client_ip(request)} to={mask_email(recipient_email)}")
     db.commit()
     return challenge_id
 
@@ -935,10 +1020,13 @@ def card_to_out(card: Card) -> CardOut:
 
 
 def deck_to_out(deck: Deck, *, viewer_profile_id: int | None = None) -> DeckOut:
+    deck_format = normalize_deck_format(deck.deck_format)
     return DeckOut(
         public_id=deck.public_id,
         title=deck.title,
         visibility=deck.visibility,
+        deck_format=deck_format,
+        deck_format_label=format_label(deck_format),
         cover_image_url=deck.cover_image_url,
         owner=profile_to_out(deck.profile, viewer_profile_id=viewer_profile_id),
         cards=[DeckCardOut(card=card_to_out(item.card), quantity=item.quantity) for item in deck.items],
@@ -970,6 +1058,8 @@ def deck_summary_out(
         public_id=deck.public_id,
         title=deck.title,
         visibility=deck.visibility,
+        deck_format=normalize_deck_format(deck.deck_format),
+        deck_format_label=format_label(deck.deck_format),
         cover_image_url=deck.cover_image_url,
         civilizations=civilizations,
         card_names=card_names,
@@ -3880,8 +3970,20 @@ def metadata(db: Session = Depends(get_db)) -> MetadataResponse:
         if civilization
     })
     types = sorted(db.scalars(select(Card.type).distinct()).all())
+    sets = sorted(
+        [value for value in db.scalars(select(Card.set_name).distinct()).all() if value],
+        key=lambda value: (set_code_number(value) or 999, value),
+    )
     max_cost = db.scalar(select(func.max(Card.cost))) or 14
-    return MetadataResponse(civilizations=civilizations, types=types, max_cost=max_cost)
+    formats = [
+        {
+            "value": str(item["value"]),
+            "label": str(item["label"]),
+            "description": str(item.get("description", "")),
+        }
+        for item in FORMAT_DEFINITIONS
+    ]
+    return MetadataResponse(civilizations=civilizations, types=types, sets=sets, formats=formats, max_cost=max_cost)
 
 
 @app.get("/api/rules/coverage")
@@ -4017,7 +4119,12 @@ def login(payload: AuthLoginIn, request: Request, response: Response, db: Sessio
     if not is_email_verified(profile):
         raise HTTPException(status_code=403, detail="Verify your email before logging in.")
     if profile.is_admin and ADMIN_2FA_ENABLED:
-        challenge_id = issue_admin_2fa_challenge(profile, request, db)
+        try:
+            challenge_id = issue_admin_2fa_challenge(profile, request, db)
+        except Exception as error:
+            logger.exception("Admin 2FA email could not be sent: %s", error)
+            detail = str(error) or LAST_EMAIL_ERROR or "Admin 2FA email could not be sent."
+            raise HTTPException(status_code=502, detail=detail) from error
         return AuthResponse(
             profile=profile_to_out(profile, include_email=True),
             admin_2fa_required=True,
@@ -5210,12 +5317,61 @@ def list_cards(
     search: str | None = None,
     civilization: str | None = None,
     type: str | None = None,
+    set_name: str | None = None,
+    format: str | None = None,
+    cost: int | None = None,
     max_cost: int | None = None,
     limit: int = 120,
     db: Session = Depends(get_db),
 ) -> CardListResponse:
     query: Select[tuple[Card]] = select(Card).order_by(Card.cost.asc(), Card.name.asc())
+    query = apply_card_list_filters(
+        query,
+        search=search,
+        civilization=civilization,
+        type=type,
+        set_name=set_name,
+        format=format,
+        cost=cost,
+        max_cost=max_cost,
+    )
 
+    cards = db.scalars(query.limit(limit)).all()
+    return CardListResponse(items=[card_to_out(card) for card in cards], total=len(cards))
+
+
+@app.get("/api/cards/costs")
+def card_costs(
+    search: str | None = None,
+    civilization: str | None = None,
+    type: str | None = None,
+    set_name: str | None = None,
+    format: str | None = None,
+    db: Session = Depends(get_db),
+) -> dict[str, list[int]]:
+    query: Select[tuple[int]] = select(Card.cost).distinct().order_by(Card.cost.asc())
+    query = apply_card_list_filters(
+        query,
+        search=search,
+        civilization=civilization,
+        type=type,
+        set_name=set_name,
+        format=format,
+    )
+    return {"costs": [int(value) for value in db.scalars(query).all()]}
+
+
+def apply_card_list_filters(
+    query: Select,
+    *,
+    search: str | None = None,
+    civilization: str | None = None,
+    type: str | None = None,
+    set_name: str | None = None,
+    format: str | None = None,
+    cost: int | None = None,
+    max_cost: int | None = None,
+) -> Select:
     if search:
         token = f"%{search.strip()}%"
         query = query.where((Card.name.ilike(token)) | (Card.text.ilike(token)) | (Card.race_label.ilike(token)))
@@ -5223,11 +5379,15 @@ def list_cards(
         query = query.where(Card.civilizations.ilike(f"%{civilization}%"))
     if type and type != "all":
         query = query.where(Card.type == type)
-    if max_cost is not None:
+    if set_name and set_name != "all":
+        query = query.where(Card.set_name == set_name)
+    if format and format != "all":
+        query = apply_format_filter(query, format)
+    if cost is not None:
+        query = query.where(Card.cost == cost)
+    elif max_cost is not None:
         query = query.where(Card.cost <= max_cost)
-
-    cards = db.scalars(query.limit(limit)).all()
-    return CardListResponse(items=[card_to_out(card) for card in cards], total=len(cards))
+    return query
 
 
 @app.get("/api/cards/by-ids", response_model=CardListResponse)
@@ -5269,6 +5429,7 @@ def create_deck(payload: DeckCreateIn, request: Request, db: Session = Depends(g
     visibility = payload.visibility.strip().lower()
     if visibility not in {"public", "private"}:
         raise HTTPException(status_code=400, detail="Visibility must be public or private.")
+    deck_format = normalize_deck_format(payload.deck_format)
 
     valid_cover_urls = {format_image_path(card.id) for card in cards_by_id.values()}
     valid_illustration_urls = {format_illustration_path(card.name) for card in cards_by_id.values()}
@@ -5308,6 +5469,7 @@ def create_deck(payload: DeckCreateIn, request: Request, db: Session = Depends(g
     if deck:
         deck.title = normalized_title
         deck.visibility = visibility
+        deck.deck_format = deck_format
         deck.cover_image_url = cover_image_url
         deck.updated_at = datetime.utcnow()
         deck.items.clear()
@@ -5317,6 +5479,7 @@ def create_deck(payload: DeckCreateIn, request: Request, db: Session = Depends(g
             public_id=generate_public_id(),
             title=normalized_title,
             visibility=visibility,
+            deck_format=deck_format,
             cover_image_url=cover_image_url,
             profile_id=profile_id,
             created_at=datetime.utcnow(),
@@ -5335,6 +5498,8 @@ def create_deck(payload: DeckCreateIn, request: Request, db: Session = Depends(g
         public_id=deck.public_id,
         title=deck.title,
         visibility=deck.visibility,
+        deck_format=normalize_deck_format(deck.deck_format),
+        deck_format_label=format_label(deck.deck_format),
         cover_image_url=deck.cover_image_url,
         share_url=f"/share/{deck.public_id}",
         pdf_url=f"/api/decks/{deck.public_id}/pdf",

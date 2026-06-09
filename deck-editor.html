@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=Cormorant+Garamond:wght@600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="./styles.css?v=20260603avatarsave">
+  <link rel="stylesheet" href="./styles.css?v=20260609costclean">
 </head>
 <body data-page="deck-editor">
   <div class="page-shell">
@@ -74,6 +74,10 @@
                 <option value="text">Text</option>
               </select>
             </label>
+            <label class="field builder-format-field workspace-format-field">
+              <span>Format</span>
+              <select id="deck-format-select"><option value="full-tcg">Full TCG</option></select>
+            </label>
             <details class="view-panel view-panel-dropdown">
               <summary class="ghost-button view-panel-toggle">View</summary>
               <div class="view-panel-grid">
@@ -88,6 +92,7 @@
                   <span>Sort Deck By</span>
                   <select id="builder-sort">
                     <option value="mana">Mana Cost</option>
+                    <option value="type">Card Type</option>
                     <option value="civilization">Civilization</option>
                   </select>
                 </label>
@@ -127,9 +132,19 @@
                       <span>Type</span>
                       <select id="type-filter"><option value="all">All</option></select>
                     </label>
+                    <label class="field builder-filter-field">
+                      <span>Format</span>
+                      <select id="format-filter"><option value="all">All Formats</option></select>
+                    </label>
+                    <label class="field builder-filter-field">
+                      <span>Set</span>
+                      <select id="set-filter"><option value="all">All Sets</option></select>
+                    </label>
                     <label class="field builder-cost-field">
-                      <span>Mana Up To <strong id="cost-filter-value">14</strong></span>
-                      <input id="cost-filter" type="range" min="1" max="14" value="14">
+                      <span>Mana Cost</span>
+                      <select id="cost-filter">
+                        <option value="0">Any</option>
+                      </select>
                     </label>
                     <button id="reset-filters-button" class="small-button">Reset Filters</button>
                   </div>
@@ -295,6 +310,6 @@
       </div>
     </article>
   </template>
-  <script src="./app.js?v=20260603avatarsave"></script>
+  <script src="./app.js?v=20260609costclean"></script>
 </body>
 </html>

@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=Cormorant+Garamond:wght@600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="./styles.css">
+  <link rel="stylesheet" href="./styles.css?v=20260609dailyrotate">
 </head>
 <body data-page="cards">
   <div class="page-shell">
@@ -42,11 +42,6 @@
     </nav>
 
     <header class="page-hero panel">
-      <div>
-        <p class="eyebrow">Card Browser</p>
-        <h1>Browse the Duel Masters catalog</h1>
-        <p class="hero-text">Use Paladin's Vault as a searchable card database, then jump back into deck building when you find what you need.</p>
-      </div>
       <div class="explore-controls">
         <label class="field explore-type-field">
           <span>Explore Type</span>
@@ -94,9 +89,18 @@
             <select id="type-filter"><option value="all">All</option></select>
           </label>
           <label class="field">
-            <span>Max Cost</span>
-            <input id="cost-filter" type="range" min="1" max="14" value="14">
-            <strong id="cost-filter-value">14</strong>
+            <span>Format</span>
+            <select id="format-filter"><option value="all">All Formats</option></select>
+          </label>
+          <label class="field">
+            <span>Set</span>
+            <select id="set-filter"><option value="all">All Sets</option></select>
+          </label>
+          <label class="field">
+            <span>Mana Cost</span>
+            <select id="cost-filter">
+              <option value="0">Any</option>
+            </select>
           </label>
         </div>
 
@@ -181,6 +185,6 @@
       </div>
     </article>
   </template>
-  <script src="./app.js"></script>
+  <script src="./app.js?v=20260609dailyrotate"></script>
 </body>
 </html>

@@ -83,6 +83,7 @@ class Deck(Base):
     public_id: Mapped[str] = mapped_column(String(40), unique=True, index=True)
     title: Mapped[str] = mapped_column(String(255))
     visibility: Mapped[str] = mapped_column(String(20), default="public", index=True)
+    deck_format: Mapped[str] = mapped_column(String(40), default="full-tcg", index=True)
     cover_image_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     profile_id: Mapped[int | None] = mapped_column(ForeignKey("profiles.id"), nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

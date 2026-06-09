@@ -33,15 +33,20 @@ def initialize_database() -> None:
 
 
 def ensure_schema_updates() -> None:
-    if engine.dialect.name != "sqlite":
-        # Fresh Render Postgres databases are created from SQLAlchemy models, so
-        # the legacy SQLite-only ALTER/PRAGMA migration path is not needed there.
-        return
-
     inspector = inspect(engine)
     existing_tables = set(inspector.get_table_names())
 
     with engine.begin() as connection:
+        if "decks" in existing_tables:
+            deck_columns = {column["name"] for column in inspector.get_columns("decks")}
+            if "deck_format" not in deck_columns:
+                connection.exec_driver_sql("ALTER TABLE decks ADD COLUMN deck_format VARCHAR(40) DEFAULT 'full-tcg'")
+
+        if engine.dialect.name != "sqlite":
+            # The remaining ALTER statements are legacy SQLite migrations for
+            # local databases; production columns are created from models.
+            return
+
         if "decks" in existing_tables:
             deck_columns = {column["name"] for column in inspector.get_columns("decks")}
             if "profile_id" not in deck_columns:

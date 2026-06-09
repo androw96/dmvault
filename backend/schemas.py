@@ -30,6 +30,8 @@ class CardListResponse(BaseModel):
 class MetadataResponse(BaseModel):
     civilizations: list[str]
     types: list[str]
+    sets: list[str] = []
+    formats: list[dict[str, str]] = []
     max_cost: int
 
 
@@ -162,6 +164,7 @@ class DeckCreateIn(BaseModel):
     public_id: str | None = None
     title: str
     visibility: str = "public"
+    deck_format: str = "full-tcg"
     cover_image_url: str | None = None
     profile_id: int | None = None
     change_note: str | None = None
@@ -177,6 +180,8 @@ class DeckSummaryOut(BaseModel):
     public_id: str
     title: str
     visibility: str = "public"
+    deck_format: str = "full-tcg"
+    deck_format_label: str = "Full TCG"
     cover_image_url: str | None = None
     civilizations: list[str] = []
     card_names: list[str] = []
@@ -210,6 +215,8 @@ class DeckOut(BaseModel):
     public_id: str
     title: str
     visibility: str = "public"
+    deck_format: str = "full-tcg"
+    deck_format_label: str = "Full TCG"
     cover_image_url: str | None = None
     owner: ProfileOut | None = None
     cards: list[DeckCardOut]
@@ -224,6 +231,8 @@ class DeckCreateOut(BaseModel):
     public_id: str
     title: str
     visibility: str = "public"
+    deck_format: str = "full-tcg"
+    deck_format_label: str = "Full TCG"
     cover_image_url: str | None = None
     share_url: str
     pdf_url: str
